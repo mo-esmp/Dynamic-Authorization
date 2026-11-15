@@ -119,6 +119,9 @@ public sealed class ResourcePolicyOptionsTests
         await using TestApp app = await TestApp.StartAsync(o => o.Services = s => s.RemoveAll<IResourcePolicyStore>());
 
         Assert.Null(app.Services.GetService<IResourcePolicyStore>());
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            app.WithScopeAsync(s => Task.FromResult(s.GetRequiredService<Management.IResourcePolicyManagementService>())));
+        Assert.Contains(nameof(IResourcePolicyStore), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

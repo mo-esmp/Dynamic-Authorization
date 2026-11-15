@@ -1,4 +1,5 @@
 ﻿using DynamicAuthorization.AspNetCore;
+using DynamicAuthorization.AspNetCore.Management;
 using DynamicAuthorization.AspNetCore.TagHelpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -45,6 +46,15 @@ public static class DynamicAuthorizationServiceCollectionExtensions
         services.TryAddSingleton<IDynamicAuthorizationCache>(sp => sp.GetRequiredService<DynamicAuthorizationCache>());
         services.TryAddSingleton<AssignablePolicyRegistry>();
         services.TryAddSingleton<ResourcePolicyEvaluator>();
+        // Resolved through a factory: most applications have no resource policy store, and validating the registration
+        // at startup must not require one.
+        services.TryAddScoped<IResourcePolicyManagementService>(sp =>
+            sp.GetService<IResourcePolicyStore>() is { } store
+                ? ActivatorUtilities.CreateInstance<ResourcePolicyManagementService>(sp, store)
+                : throw new InvalidOperationException(
+                    $"No {nameof(IResourcePolicyStore)} is registered to store the policies assigned to resources. Call " +
+                    "AddEntityFrameworkStore<TContext>() and enable the table with EnableDynamicAuthorization(o => o.ResourcePolicies = true), " +
+                    $"or register your own {nameof(IResourcePolicyStore)}."));
         services.TryAddSingleton<EndpointAuthorizationResolver>();
         services.TryAddSingleton<EndpointPolicyCache>();
         services.TryAddSingleton<IPermissionCatalogProvider, PermissionCatalogProvider>();
