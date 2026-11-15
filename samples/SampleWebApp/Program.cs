@@ -23,15 +23,28 @@ builder.Services.ConfigureApplicationCookie(options =>
 builder.Services.AddRazorPages(options => options.Conventions.AuthorizeFolder("/Orders"));
 builder.Services.AddControllersWithViews();
 
+// Policies defined in code, which admins can assign to resources in the dashboard (Policies page) instead of
+// hard-coding [Authorize(Policy = "...")] on pages and endpoints.
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("BusinessHours", policy => policy.RequireAssertion(_ =>
+        DateTime.Now is { DayOfWeek: not (DayOfWeek.Saturday or DayOfWeek.Sunday), Hour: >= 8 and < 18 }))
+    .AddPolicy("CompanyAccounts", policy => policy.RequireAssertion(context =>
+        context.User.Identity?.Name?.EndsWith("@example.com", StringComparison.OrdinalIgnoreCase) == true));
+
 builder.Services
     .AddDynamicAuthorization(options =>
     {
-        // The super admin can access everything, including the dashboard, before any role exists.
+        // The super admin can access everything, including the dashboard, before any role exists. Super admins also
+        // skip the policies assigned to resources.
         options.SuperAdminUsers.Add(SeedData.AdminUserName);
 
         // A permission that is checked in code rather than bound to an endpoint. Named {resource}.{operation}, it is
         // listed with the other operations on orders in the dashboard.
         options.AddPermission("orders.export", "Export orders");
+
+        // The policies admins may assign to resources.
+        options.AddAssignablePolicy("BusinessHours", "Business hours", "Monday to Friday, 8:00 to 18:00 server time.");
+        options.AddAssignablePolicy("CompanyAccounts", "Company accounts", "The user signs in with an @example.com account.");
     })
     .AddEntityFrameworkStore<ApplicationDbContext>()
     .AddDashboard();

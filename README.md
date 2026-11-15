@@ -27,7 +27,7 @@ Framework Core** (any provider), and ships a **dashboard** to manage roles, perm
 | --- | --- |
 | `DynamicAuthorization.AspNetCore` | Permission discovery, the authorization handler, the `secure-content` tag helper and `IPermissionChecker`. |
 | `DynamicAuthorization.AspNetCore.EntityFrameworkCore` | Stores role permissions in your Identity `DbContext`, with any EF Core provider. |
-| `DynamicAuthorization.AspNetCore.Dashboard` | A Razor Pages dashboard to manage roles and user roles, inspect endpoints and check access. |
+| `DynamicAuthorization.AspNetCore.Dashboard` | A Razor Pages dashboard to manage roles, user roles and the policies assigned to resources, inspect endpoints and check access. |
 | `DynamicAuthorization.AspNetCore.HybridCache` | Caches user roles and role permissions in `HybridCache`, shared between instances through a distributed cache. |
 
 Version 2 targets **.NET 10** and **.NET 11**. Version 1.x (`DynamicAuthorization.Mvc.*`) remains available for older frameworks; see
@@ -217,6 +217,61 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("CanExport", policy => policy.AddRequirements(new DynamicPermissionRequirement("orders.export"))));
 ```
 
+## Assigning policies to resources
+
+Instead of hard-coding `[Authorize(Policy = "...")]` on pages and endpoints, let admins assign your authorization
+policies to resources in the dashboard. Every request to a permission-checked endpoint of the resource must then pass the
+assigned policies, **in addition to** its permission. Policies stay defined in code; only their assignment changes at
+runtime, without a redeploy.
+
+Declare which policies admins may assign, and enable the table that stores the assignments:
+
+```csharp
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("BusinessHours", policy => policy.AddRequirements(new BusinessHoursRequirement()))
+    .AddPolicy("RequireMfa", policy => policy.RequireClaim("amr", "mfa"));
+
+builder.Services
+    .AddDynamicAuthorization(options =>
+    {
+        options.AddAssignablePolicy("BusinessHours", "Business hours", "Monday to Friday, 8:00 to 18:00.");
+        options.AddAssignablePolicy("RequireMfa", "Multi-factor sign-in");
+    })
+    .AddEntityFrameworkStore<ApplicationDbContext>()
+    .AddDashboard();
+
+// In OnModelCreating, then add a migration:
+modelBuilder.EnableDynamicAuthorization(o => o.ResourcePolicies = true); // adds the AspNetResourcePolicies table
+```
+
+The table is opt-in, so applications that don't assign policies have nothing to migrate. Admins then choose each resource's
+policies on the dashboard's **Policies** page, which exists only while a policy is assignable.
+
+- **Per resource.** A policy assigned to `orders` applies to every permission-checked endpoint of the resource: the
+  `OrdersController` actions, the `/Orders` pages and `/api/orders`, whatever the operation. The resource is the endpoint's
+  own (its controller, page folder or route, or `[PermissionResource]`), not the resource of the permission it requires:
+  `[Permission("reports.export")]` on an `OrdersController` action is guarded by the policies of `orders`.
+- **All must pass.** Every assigned policy must succeed, like stacked `[Authorize(Policy = ...)]` attributes. Assignments
+  never grant a permission; they only add restrictions.
+- **Super admins skip them.** Super admins are the way back in if a policy can never pass. The dashboard's own resources
+  (`authz.*`) take policies only while a super admin user or role is configured, so nobody can be locked out of it.
+- **Requests only.** Assigned policies apply when a request is authorized. Endpoints that are not permission-checked
+  (`[AllowAnonymous]`, `[IgnoreDynamicAuthorization]`, ignored areas, or protected only by roles or named policies) and
+  explicit permissions (`new DynamicPermissionRequirement("orders.export")`) are not affected, and neither are
+  `IPermissionChecker` and the `secure-content` tag helper: a link can be shown for a page that an assigned policy denies.
+- **Names, not schemes.** Policies are resolved by name through the `IAuthorizationPolicyProvider`, so a custom provider can
+  supply them. A policy with authentication schemes, or one that itself requires a dynamic permission, cannot be assigned:
+  it would mean something else when evaluated after the permission, so it denies if it shows up anyway. An endpoint
+  protected by a named policy that only a custom provider knows is treated as statically protected and gets no assigned
+  policies.
+- **Removing a registration.** A stored assignment of a policy that is no longer registered with `AddAssignablePolicy` is
+  skipped (with a warning in the log and on the Overview page), and enforced again if the policy is registered again.
+  During a rolling deployment, instances with different registrations can therefore enforce different policies. A
+  registered policy that the provider cannot find denies.
+
+Assignments are cached like role permissions, as one entry; the management service invalidates it when they change. Use
+`IResourcePolicyManagementService` to change them in code, or call `IDynamicAuthorizationCache.InvalidateResourcePoliciesAsync`
+after changing the store yourself. To store them elsewhere, implement `IResourcePolicyStore`.
 
 ## Showing content only to users who may access it
 
@@ -270,6 +325,8 @@ It has no JavaScript or CSS dependencies and works with a strict Content Securit
 - **Endpoints**: every page, action and Minimal API with its route, protection, permission and the roles that can access it.
 - **Roles**: create, rename and delete roles, and choose their permissions in a resources × operations matrix (read, create,
   update, delete and custom operations), with a filter and an unsaved-changes counter.
+- **Policies**: assign authorization policies to resources (see [Assigning policies to resources](#assigning-policies-to-resources)).
+  Shown only while a policy is assignable.
 - **Users**: search users, assign roles, and see each user's effective permissions and which role grants them.
 - **Access check**: pick a user and a permission to see whether access is granted, and why.
 
@@ -287,7 +344,8 @@ By default, the dashboard is protected by permissions like any other part of the
 `authz.roles.create`, `authz.roles.update`, `authz.roles.delete`, `authz.users.read`, `authz.users.update`, and read access to
 the overview, endpoints and access check. You can let a role view roles without letting it change them, or manage roles
 without managing users. Navigation and buttons only show what the user may do. Treat the role and user permissions as
-administrator access: whoever can edit roles can grant themselves any permission.
+administrator access: whoever can edit roles can grant themselves any permission. The Policies page requires
+`authz.policies.read`, and `authz.policies.update` to change assignments.
 
 ### Searching users
 
@@ -356,7 +414,8 @@ To use another cache, implement `IDynamicAuthorizationCacheStore` and register i
 replace the registration afterwards. The interface documents the contract permission checks rely on: concurrent reads of
 one key share one load, an invalidation during a load discards its result, failed loads are not kept, and a load runs to
 completion when the caller that started it is cancelled. The cache tests in the repository run against every
-implementation.
+implementation. Implement `IResourcePolicyCacheStore` as well to cache the [policies assigned to
+resources](#assigning-policies-to-resources); otherwise they are cached in the memory of each instance.
 
 The permissions of roles that are not cached are loaded with one store call: the Entity Framework store runs one query,
 and a custom `IPermissionStore` can implement `GetPermissionsAsync(IEnumerable<string> roleIds, ...)` to do the same.
@@ -376,8 +435,10 @@ outlives a request, for example one held by a background service, sees changes m
 | `IgnoredAreas` | `Identity` | Areas that only require a signed-in user. |
 | `CacheDuration` | 1 minute | How long user roles and role permissions are cached. |
 | `Permissions` / `AddPermission` | empty | Permissions that are not bound to an endpoint. |
+| `AssignablePolicies` / `AddAssignablePolicy` | empty | Authorization policies admins may assign to resources. |
 
-`EnableDynamicAuthorization(o => { o.TableName = "..."; o.Schema = "..."; })` customizes the table.
+`EnableDynamicAuthorization(o => { o.TableName = "..."; o.Schema = "..."; })` customizes the table;
+`o.ResourcePolicies = true` adds the table of the policies assigned to resources (`o.ResourcePolicyTableName`).
 
 ## Migrating from 1.x
 
@@ -419,8 +480,8 @@ you removed `Identity` from `IgnoredAreas`) now require permissions too.
 ## Sample
 
 [`samples/SampleWebApp`](https://github.com/mo-esmp/Dynamic-Authorization/tree/main/samples/SampleWebApp) protects
-Razor Pages, an MVC area and Minimal APIs, uses SQLite with migrations, and seeds three demo accounts (the password is
-in `appsettings.json`):
+Razor Pages, an MVC area and Minimal APIs, uses SQLite with migrations, registers two policies admins can assign to
+resources (`BusinessHours` and `CompanyAccounts`), and seeds three demo accounts (the password is in `appsettings.json`):
 
 ```shell
 dotnet run --project samples/SampleWebApp --framework net11.0 --launch-profile http
