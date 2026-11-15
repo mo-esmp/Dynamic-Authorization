@@ -31,7 +31,7 @@ namespace DynamicAuthorization.AspNetCore.HybridCache;
 ///     change made elsewhere when the next read would.
 ///   </para>
 /// </remarks>
-internal sealed class HybridDynamicAuthorizationCacheStore : IDynamicAuthorizationCacheStore
+internal sealed class HybridDynamicAuthorizationCacheStore : IDynamicAuthorizationCacheStore, IResourcePolicyCacheStore
 {
     private const int PruneAbove = 1024;
 
@@ -130,6 +130,33 @@ internal sealed class HybridDynamicAuthorizationCacheStore : IDynamicAuthorizati
 
         return new CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>(permissions, expiresAt);
     }
+
+    public async ValueTask<CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>> GetResourcePoliciesAsync(
+        Func<CancellationToken, Task<IReadOnlyDictionary<string, IReadOnlySet<string>>>> load,
+        CancellationToken cancellationToken)
+    {
+        string key = ResourcePoliciesKey;
+        (CachedResourcePolicies policies, long validUntil) = await ReadAsync(
+            key,
+            ResourcePoliciesMarkerKey,
+            async (startedAt, ct) =>
+            {
+                IReadOnlyDictionary<string, IReadOnlySet<string>> loaded = await load(ct).ConfigureAwait(false);
+                Dictionary<string, string[]> assignments = new(loaded.Count, StringComparer.OrdinalIgnoreCase);
+                foreach ((string resource, IReadOnlySet<string> names) in loaded)
+                {
+                    assignments[resource] = [.. names];
+                }
+
+                return new CachedResourcePolicies(assignments, startedAt, startedAt + _lifetime);
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return new CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>(policies.Map, ExpiresAt(key, policies, validUntil));
+    }
+
+    public ValueTask InvalidateResourcePoliciesAsync(CancellationToken cancellationToken) =>
+        InvalidateAsync(ResourcePoliciesKey, ResourcePoliciesMarkerKey, cancellationToken);
 
     public ValueTask InvalidateUserAsync(string userId, CancellationToken cancellationToken) =>
         InvalidateAsync(UserKey(userId), UserMarkerKey(userId), cancellationToken);
@@ -301,6 +328,10 @@ internal sealed class HybridDynamicAuthorizationCacheStore : IDynamicAuthorizati
 
     private string RoleMarkerKey(string roleId) => _keyPrefix + "invalidated:role:" + roleId;
 
+    private string ResourcePoliciesKey => _keyPrefix + "resource-policies";
+
+    private string ResourcePoliciesMarkerKey => _keyPrefix + "invalidated:resource-policies";
+
     private static TimeSpan Cap(TimeSpan lifetime) => lifetime > s_maxLifetime ? s_maxLifetime : lifetime;
 
     /// <summary>
@@ -370,5 +401,27 @@ internal sealed class HybridDynamicAuthorizationCacheStore : IDynamicAuthorizati
 
         [JsonIgnore]
         public IReadOnlySet<string> Set => _set ??= new HashSet<string>(Permissions, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///   The cached policies assigned to resources. The map is built once per instance and kept with it; it compares
+    ///   resources and names ignoring case, which serialization does not preserve.
+    /// </summary>
+    [ImmutableObject(true)]
+    internal sealed class CachedResourcePolicies(Dictionary<string, string[]> assignments, DateTimeOffset loadStartedAt, DateTimeOffset expiresAt) : ICachedItem
+    {
+        private IReadOnlyDictionary<string, IReadOnlySet<string>>? _map;
+
+        public Dictionary<string, string[]> Assignments { get; } = assignments;
+
+        public DateTimeOffset LoadStartedAt { get; } = loadStartedAt;
+
+        public DateTimeOffset ExpiresAt { get; } = expiresAt;
+
+        [JsonIgnore]
+        public IReadOnlyDictionary<string, IReadOnlySet<string>> Map => _map ??= Assignments.ToDictionary(
+            a => a.Key,
+            IReadOnlySet<string> (a) => new HashSet<string>(a.Value, StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
     }
 }
