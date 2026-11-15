@@ -126,6 +126,56 @@ public sealed partial class DashboardPolicyTests
         }
     }
 
+    [Fact]
+    public async Task Other_pages_show_assigned_policies()
+    {
+        await using TestApp app = await StartAsync();
+        await app.WithScopeAsync(async s =>
+        {
+            IResourcePolicyStore store = s.GetRequiredService<IResourcePolicyStore>();
+            await store.SetPoliciesAsync("orders", ["Deny", "Retired"]);
+            await store.SetPoliciesAsync("removed", ["Allow"]);
+            return true;
+        });
+        HttpClient admin = app.CreateClient(await app.CreateSuperAdminAsync());
+        TestUser alice = await app.CreateUserWithPermissionsAsync("alice", "orders.read");
+
+        string endpoints = await admin.GetStringAsync("/authz/Endpoints");
+        string access = await admin.GetStringAsync($"/authz/Access?userId={alice.Id}&permission=orders.read");
+        string overview = await admin.GetStringAsync("/authz");
+
+        Assert.Contains("<th scope=\"col\">Policies</th>", endpoints, StringComparison.Ordinal);
+        Assert.Contains("data-policy=\"Deny\"", endpoints, StringComparison.Ordinal);
+        Assert.Contains("data-skipped-policy=\"Retired\"", endpoints, StringComparison.Ordinal);
+        Assert.Contains("data-assigned-policies", access, StringComparison.Ordinal);
+        Assert.Contains("data-policy=\"Deny\"", access, StringComparison.Ordinal);
+        Assert.Contains("data-skipped-policies", access, StringComparison.Ordinal);
+        Assert.Contains("data-orphaned-policies=\"removed\"", overview, StringComparison.Ordinal);
+        Assert.Contains("data-skipped-policies=\"orders\"", overview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Other_pages_do_not_read_assignments_while_no_policy_is_assignable()
+    {
+        InMemoryResourcePolicyStore store = new() { Throw = true };
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Dashboard = true;
+            o.Services = s => s.AddSingleton<IResourcePolicyStore>(store);
+        });
+        HttpClient admin = app.CreateClient(await app.CreateSuperAdminAsync());
+        TestUser alice = await app.CreateUserWithPermissionsAsync("alice", "orders.read");
+
+        string endpoints = await admin.GetStringAsync("/authz/Endpoints");
+        string access = await admin.GetStringAsync($"/authz/Access?userId={alice.Id}&permission=orders.read");
+        string overview = await admin.GetStringAsync("/authz");
+
+        Assert.DoesNotContain("<th scope=\"col\">Policies</th>", endpoints, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-assigned-policies", access, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-orphaned-policies", overview, StringComparison.Ordinal);
+        Assert.Equal(0, store.Reads);
+    }
+
     private static Task<TestApp> StartAsync(Action<DynamicAuthorizationOptions>? configure = null) =>
         TestApp.StartAsync(o =>
         {

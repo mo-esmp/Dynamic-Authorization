@@ -1,6 +1,8 @@
-﻿using Microsoft.AspNetCore.Mvc.Filters;
+﻿using DynamicAuthorization.AspNetCore.Management;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace DynamicAuthorization.AspNetCore.Dashboard;
 
@@ -52,6 +54,15 @@ internal abstract class DashboardPageModel : PageModel
         return target.Permission is null
             || await GetService<IPermissionChecker>().HasPermissionAsync(User, target.Permission.Permission, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    ///   Gets the policies assigned to resources, keyed by resource ignoring case, or <see langword="null"/> while no
+    ///   policy is assignable, in which case the store is not read.
+    /// </summary>
+    private protected async Task<ResourcePolicyAssignments?> GetResourcePolicyAssignmentsAsync(CancellationToken cancellationToken) =>
+        GetService<IOptions<DynamicAuthorizationOptions>>().Value.AssignablePolicies.Count == 0
+            ? null
+            : await GetService<IResourcePolicyManagementService>().GetAssignmentsAsync(cancellationToken).ConfigureAwait(false);
 
     private protected void SetStatus(string message) => TempData[DashboardConstants.StatusKey] = message;
 

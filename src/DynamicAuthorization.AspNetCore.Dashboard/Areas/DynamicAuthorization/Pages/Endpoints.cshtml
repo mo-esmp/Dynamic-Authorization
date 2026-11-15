@@ -57,6 +57,10 @@
                     <th scope="col">Protection</th>
                     <th scope="col">Permission</th>
                     <th scope="col">Granted to</th>
+                    @if (Model.ShowPolicies)
+                    {
+                        <th scope="col">Policies</th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -110,10 +114,33 @@
                                 </span>
                             }
                         </td>
+                        @if (Model.ShowPolicies)
+                        {
+                            ResourcePolicySummary? policies = Model.GetPolicies(endpoint);
+                            <td>
+                                @if (policies is null || (policies.Enforced.Count == 0 && policies.Skipped.Count == 0))
+                                {
+                                    <span class="da-subtle">—</span>
+                                }
+                                else
+                                {
+                                    <span class="da-badges">
+                                        @foreach (string policy in policies.Enforced)
+                                        {
+                                            <span class="da-badge da-badge-accent" data-policy="@policy">@DashboardIcons.Lock @policy</span>
+                                        }
+                                        @foreach (string policy in policies.Skipped)
+                                        {
+                                            <span class="da-badge da-badge-warning" data-skipped-policy="@policy" title="No longer registered as assignable, so it is not enforced">@policy (skipped)</span>
+                                        }
+                                    </span>
+                                }
+                            </td>
+                        }
                     </tr>
                 }
                 <tr data-filter-empty hidden>
-                    <td colspan="5" class="da-empty">No endpoints match the filter.</td>
+                    <td colspan="@(Model.ShowPolicies ? 6 : 5)" class="da-empty">No endpoints match the filter.</td>
                 </tr>
             </tbody>
         </table>

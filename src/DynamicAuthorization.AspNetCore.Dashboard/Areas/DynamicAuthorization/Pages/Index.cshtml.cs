@@ -46,7 +46,21 @@ internal sealed class IndexModel : DashboardPageModel
 
     public IReadOnlyList<RoleSummary> RolesWithoutPermissions { get; private set; } = [];
 
-    public bool NeedsAttention => UnprotectedEndpointCount > 0 || OrphanedGrantCount > 0 || RolesWithoutUsers.Count > 0 || RolesWithoutPermissions.Count > 0;
+    /// <summary>
+    ///   Gets the assignments of resources that no longer have permission-checked endpoints.
+    /// </summary>
+    public IReadOnlyList<ResourcePolicySummary> OrphanedPolicies { get; private set; } = [];
+
+    /// <summary>
+    ///   Gets the resources with assigned policies that are no longer registered, and therefore skipped.
+    /// </summary>
+    public IReadOnlyList<ResourcePolicySummary> SkippedPolicies { get; private set; } = [];
+
+    public bool CanViewPolicies { get; private set; }
+
+    public bool NeedsAttention =>
+        UnprotectedEndpointCount > 0 || OrphanedGrantCount > 0 || RolesWithoutUsers.Count > 0 || RolesWithoutPermissions.Count > 0
+        || OrphanedPolicies.Count > 0 || SkippedPolicies.Count > 0;
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
@@ -78,6 +92,13 @@ internal sealed class IndexModel : DashboardPageModel
 
         RolesWithoutUsers = [.. Roles.Where(r => r.UserCount == 0)];
         RolesWithoutPermissions = [.. Roles.Where(r => r.PermissionCount == 0 && !Settings.SuperAdminRoles.Contains(r.Name))];
+
+        if (await GetResourcePolicyAssignmentsAsync(cancellationToken) is { } assignments)
+        {
+            CanViewPolicies = await CanAccessPageAsync("/Policies/Index", cancellationToken);
+            OrphanedPolicies = assignments.Orphaned;
+            SkippedPolicies = [.. assignments.Resources.Where(r => r.Skipped.Count > 0)];
+        }
     }
 }
 
