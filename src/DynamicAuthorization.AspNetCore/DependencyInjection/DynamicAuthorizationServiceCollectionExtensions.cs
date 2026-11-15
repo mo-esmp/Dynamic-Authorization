@@ -44,6 +44,7 @@ public static class DynamicAuthorizationServiceCollectionExtensions
         services.TryAddSingleton<DynamicAuthorizationCache>();
         services.TryAddSingleton<IDynamicAuthorizationCache>(sp => sp.GetRequiredService<DynamicAuthorizationCache>());
         services.TryAddSingleton<AssignablePolicyRegistry>();
+        services.TryAddSingleton<ResourcePolicyEvaluator>();
         services.TryAddSingleton<EndpointAuthorizationResolver>();
         services.TryAddSingleton<EndpointPolicyCache>();
         services.TryAddSingleton<IPermissionCatalogProvider, PermissionCatalogProvider>();
