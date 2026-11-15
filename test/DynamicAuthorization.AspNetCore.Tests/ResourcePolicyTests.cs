@@ -225,19 +225,25 @@ public sealed class ResourcePolicyTests
         await AssignAsync(app, "orders", "Counted");
         ClaimsPrincipal principal = await app.CreatePrincipalAsync(user);
 
-        (bool first, bool second) = await app.WithScopeAsync(async services =>
+        (bool first, bool second, bool otherEndpoint) = await app.WithScopeAsync(async services =>
         {
             DefaultHttpContext context = new() { RequestServices = services, User = principal };
             context.SetEndpoint(app.GetCatalog().FindEndpoint("mvc::Orders:Index")!.Endpoint);
             IAuthorizationService authorization = services.GetRequiredService<IAuthorizationService>();
+            bool first = (await authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)).Succeeded;
+            bool second = (await authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)).Succeeded;
 
-            return ((await authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)).Succeeded,
-                (await authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)).Succeeded);
+            // Another endpoint of the same resource, in the same request, is evaluated afresh.
+            context.SetEndpoint(app.GetCatalog().FindEndpoint("endpoint:GET /api/v1/orders")!.Endpoint);
+            bool otherEndpoint = (await authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)).Succeeded;
+
+            return (first, second, otherEndpoint);
         });
 
         Assert.False(first);
         Assert.False(second);
-        Assert.Equal(1, counter.Count);
+        Assert.True(otherEndpoint);
+        Assert.Equal(2, counter.Count);
     }
 
     [Fact]
