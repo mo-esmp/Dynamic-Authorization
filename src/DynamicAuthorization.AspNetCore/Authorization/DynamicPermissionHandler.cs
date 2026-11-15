@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -33,7 +34,8 @@ internal sealed partial class DynamicPermissionHandler(
         // Only the decision is needed here: stop at the first role that grants the permission instead of collecting
         // every granting role, which costs one store query per role on a cold cache.
         CancellationToken cancellationToken = context.Resource is HttpContext httpContext ? httpContext.RequestAborted : default;
-        if (await permissionChecker.HasPermissionAsync(context.User, permission, cancellationToken).ConfigureAwait(false))
+        PermissionDecision? decision = await DecideAsync(context.User, permission, cancellationToken).ConfigureAwait(false);
+        if (decision is PermissionDecision.GrantedByRole or PermissionDecision.SuperAdminRole or PermissionDecision.SuperAdminUser)
         {
             LogPermissionGranted(logger, permission, context.User.Identity?.Name);
             context.Succeed(requirement);
@@ -42,6 +44,23 @@ internal sealed partial class DynamicPermissionHandler(
         {
             LogPermissionDenied(logger, permission, context.User.Identity?.Name);
         }
+    }
+
+    /// <summary>
+    ///   Decides the permission. The built-in checker tells how, for example that the user is a super admin, at the cost
+    ///   of the decision alone; an application's own checker only answers granted (reported as
+    ///   <see cref="PermissionDecision.GrantedByRole"/>) or not.
+    /// </summary>
+    private async Task<PermissionDecision?> DecideAsync(ClaimsPrincipal user, string permission, CancellationToken cancellationToken)
+    {
+        if (permissionChecker is PermissionChecker builtIn)
+        {
+            return await builtIn.DecideAsync(user, permission, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await permissionChecker.HasPermissionAsync(user, permission, cancellationToken).ConfigureAwait(false)
+            ? PermissionDecision.GrantedByRole
+            : null;
     }
 
     /// <summary>
