@@ -21,6 +21,32 @@ touching the source code?
 **MVC controllers, Razor Pages and Minimal APIs**, stores permissions in your **ASP.NET Core Identity database with Entity
 Framework Core** (any provider), and ships a **dashboard** to manage roles, permissions and user roles.
 
+## Contents
+
+- [Packages](#packages)
+- [Getting started](#getting-started)
+  - [1. Install the packages](#1-install-the-packages)
+  - [2. Add the permissions table to your Identity context](#2-add-the-permissions-table-to-your-identity-context)
+  - [3. Register dynamic authorization](#3-register-dynamic-authorization)
+- [Permissions: resources and operations](#permissions-resources-and-operations)
+  - [Overriding the convention](#overriding-the-convention)
+  - [One permission per endpoint](#one-permission-per-endpoint)
+  - [What is permission-checked](#what-is-permission-checked)
+  - [Display names](#display-names)
+  - [Permissions checked in code](#permissions-checked-in-code)
+- [Assigning policies to resources](#assigning-policies-to-resources)
+- [Showing content only to users who may access it](#showing-content-only-to-users-who-may-access-it)
+- [Super admins](#super-admins)
+- [Dashboard](#dashboard)
+  - [Searching users](#searching-users)
+- [Caching and multiple instances](#caching-and-multiple-instances)
+  - [Sharing the cache between instances](#sharing-the-cache-between-instances)
+- [Options](#options)
+- [Migrating from 1.x](#migrating-from-1x)
+- [Sample](#sample)
+- [Building](#building)
+- [License](#license)
+
 ## Packages
 
 | Package | Description |
