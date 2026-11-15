@@ -60,15 +60,17 @@
                 {
                     <tr data-row data-search="@($"{resource.DisplayName} {resource.Resource} {string.Join(' ', resource.Enforced)} {string.Join(' ', resource.Skipped)}")">
                         <td>
-                            @if (Model.CanEdit)
-                            {
-                                <a class="da-link da-cell-title" asp-page="Edit" asp-route-resource="@resource.Resource">@resource.DisplayName</a>
-                            }
-                            else
-                            {
-                                <span class="da-cell-title">@resource.DisplayName</span>
-                            }
-                            <span class="da-cell-sub da-mono">@resource.Resource</span>
+                            <div class="da-cell-title">
+                                @if (Model.CanEdit)
+                                {
+                                    <a class="da-link" asp-page="Edit" asp-route-resource="@resource.Resource">@resource.DisplayName</a>
+                                }
+                                else
+                                {
+                                    @resource.DisplayName
+                                }
+                            </div>
+                            <div class="da-cell-sub da-mono">@resource.Resource</div>
                         </td>
                         <td class="da-num">@resource.EndpointCount</td>
                         <td>
