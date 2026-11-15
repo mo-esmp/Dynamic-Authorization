@@ -279,8 +279,10 @@ policies on the dashboard's **Policies** page, which exists only while a policy 
   `[Permission("reports.export")]` on an `OrdersController` action is guarded by the policies of `orders`.
 - **All must pass.** Every assigned policy must succeed, like stacked `[Authorize(Policy = ...)]` attributes. Assignments
   never grant a permission; they only add restrictions.
-- **Super admins skip them.** Super admins are the way back in if a policy can never pass. The dashboard's own resources
-  (`authz.*`) take policies only while a super admin user or role is configured, so nobody can be locked out of it.
+- **Super admins skip them**, without the assignments even being read, so they keep access if the store is unavailable.
+  Super admins are the way back in if a policy can never pass. The dashboard's own resources (`authz.*`) take policies
+  only while a super admin user or role is configured, and their policies are skipped if a later configuration has none,
+  so nobody can be locked out of it.
 - **Requests only.** Assigned policies apply when a request is authorized. Endpoints that are not permission-checked
   (`[AllowAnonymous]`, `[IgnoreDynamicAuthorization]`, ignored areas, or protected only by roles or named policies) and
   explicit permissions (`new DynamicPermissionRequirement("orders.export")`) are not affected, and neither are
@@ -294,6 +296,11 @@ policies on the dashboard's **Policies** page, which exists only while a policy 
   skipped (with a warning in the log and on the Overview page), and enforced again if the policy is registered again.
   During a rolling deployment, instances with different registrations can therefore enforce different policies. A
   registered policy that the provider cannot find denies.
+
+Assigned policies receive the authorization resource the request was authorized with (the `HttpContext`, or an MVC
+filter context), as they would on the endpoint itself. Replacing a resource's policies runs in a serializable transaction:
+of two concurrent edits, the last to commit wins, and on some providers the other fails with a serialization error and
+can be saved again.
 
 Assignments are cached like role permissions, as one entry; the management service invalidates it when they change. Use
 `IResourcePolicyManagementService` to change them in code, or call `IDynamicAuthorizationCache.InvalidateResourcePoliciesAsync`

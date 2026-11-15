@@ -3,6 +3,9 @@ using System.Security.Claims;
 using DynamicAuthorization.AspNetCore.Tests.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
@@ -137,14 +140,121 @@ public sealed class ResourcePolicyTests
         Assert.Equal(HttpStatusCode.OK, await app.CreateClient(user).GetStatusAsync("/Orders"));
     }
 
+    /// <summary>
+    ///   Two deployments of one application on the same store: the first no longer registers the policy, so its stored
+    ///   assignment is skipped; the next registers it again, and the same assignment is enforced again.
+    /// </summary>
     [Fact]
     public async Task Registering_a_policy_again_reactivates_its_assignments()
     {
-        await using TestApp app = await StartAsync(assignable: ["Deny"]);
-        TestUser user = await app.CreateUserWithPermissionsAsync("alice", "orders.read");
-        await AssignAsync(app, "orders", "Deny");
+        InMemoryResourcePolicyStore store = new();
+        await store.SetPoliciesAsync("orders", ["Deny"]);
 
-        Assert.Equal(HttpStatusCode.Forbidden, await app.CreateClient(user).GetStatusAsync("/Orders"));
+        await using (TestApp withoutRegistration = await StartAsync(assignable: ["Allow"], services: s => s.AddSingleton<IResourcePolicyStore>(store)))
+        {
+            TestUser user = await withoutRegistration.CreateUserWithPermissionsAsync("alice", "orders.read");
+            Assert.Equal(HttpStatusCode.OK, await withoutRegistration.CreateClient(user).GetStatusAsync("/Orders"));
+        }
+
+        await using TestApp registeredAgain = await StartAsync(assignable: ["Allow", "Deny"], services: s => s.AddSingleton<IResourcePolicyStore>(store));
+        TestUser again = await registeredAgain.CreateUserWithPermissionsAsync("alice", "orders.read");
+
+        Assert.Equal(HttpStatusCode.Forbidden, await registeredAgain.CreateClient(again).GetStatusAsync("/Orders"));
+        Assert.Equal(["Deny"], (await store.GetAssignmentsAsync())["orders"]);
+    }
+
+    /// <summary>
+    ///   Super admins skip assigned policies without reading them, so they keep access when the assignments cannot be
+    ///   read, for example when the store is down.
+    /// </summary>
+    [Fact]
+    public async Task Super_admins_do_not_depend_on_the_assignments_being_readable()
+    {
+        InMemoryResourcePolicyStore store = new() { Throw = true };
+        await using TestApp app = await StartAsync(services: s => s.AddSingleton<IResourcePolicyStore>(store));
+        TestUser superAdmin = await app.CreateSuperAdminAsync();
+
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(superAdmin).GetStatusAsync("/Orders"));
+        Assert.Equal(0, store.Reads);
+    }
+
+    /// <summary>
+    ///   An assigned policy receives the resource the request was authorized with, so a policy written for MVC filter
+    ///   contexts behaves as it would on the endpoint itself.
+    /// </summary>
+    [Fact]
+    public async Task Assigned_policies_receive_the_authorization_resource_as_given()
+    {
+        await using TestApp app = await StartAsync(assignable: ["FilterOnly"]);
+        TestUser user = await app.CreateUserWithPermissionsAsync("alice", "orders.read");
+        await AssignAsync(app, "orders", "FilterOnly");
+        ClaimsPrincipal principal = await app.CreatePrincipalAsync(user);
+        Endpoint endpoint = app.GetCatalog().FindEndpoint("mvc::Orders:Index")!.Endpoint;
+
+        (bool filter, bool request) = await app.WithScopeAsync(async services =>
+        {
+            IAuthorizationService authorization = services.GetRequiredService<IAuthorizationService>();
+            DefaultHttpContext filterRequest = new() { RequestServices = services, User = principal };
+            filterRequest.SetEndpoint(endpoint);
+            AuthorizationFilterContext filterContext = new(new ActionContext(filterRequest, new RouteData(), new ActionDescriptor()), []);
+            DefaultHttpContext plainRequest = new() { RequestServices = services, User = principal };
+            plainRequest.SetEndpoint(endpoint);
+
+            return ((await authorization.AuthorizeAsync(principal, filterContext, s_dynamicPolicy)).Succeeded,
+                (await authorization.AuthorizeAsync(principal, plainRequest, s_dynamicPolicy)).Succeeded);
+        });
+
+        Assert.True(filter);
+        Assert.False(request);
+    }
+
+    /// <summary>
+    ///   Concurrent authorizations of the same principal and endpoint in one request share one evaluation.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_authorizations_in_a_request_evaluate_the_policies_once()
+    {
+        PolicyCounter counter = new() { Gated = true };
+        await using TestApp app = await StartAsync(services: s => s.AddSingleton(counter));
+        TestUser user = await app.CreateUserWithPermissionsAsync("alice", "orders.read");
+        await AssignAsync(app, "orders", "Counted");
+        ClaimsPrincipal principal = await app.CreatePrincipalAsync(user);
+
+        bool[] results = await app.WithScopeAsync(async services =>
+        {
+            DefaultHttpContext context = new() { RequestServices = services, User = principal };
+            context.SetEndpoint(app.GetCatalog().FindEndpoint("mvc::Orders:Index")!.Endpoint);
+            IAuthorizationService authorization = services.GetRequiredService<IAuthorizationService>();
+
+            Task<AuthorizationResult>[] pending = [.. Enumerable.Range(0, 8).Select(_ => Task.Run(() => authorization.AuthorizeAsync(principal, context, s_dynamicPolicy)))];
+            await counter.Started;
+            await Task.Delay(100);
+            counter.Release();
+
+            return (await Task.WhenAll(pending)).Select(r => r.Succeeded).ToArray();
+        });
+
+        Assert.All(results, Assert.True);
+        Assert.Equal(1, counter.Count);
+    }
+
+    /// <summary>
+    ///   Policies assigned to the dashboard's own resources are skipped once no super admin is configured, for example
+    ///   after a deployment removed the last one, so that nobody is locked out of the dashboard.
+    /// </summary>
+    [Fact]
+    public async Task Dashboard_assignments_are_skipped_while_no_super_admin_is_configured()
+    {
+        InMemoryResourcePolicyStore store = new();
+        await store.SetPoliciesAsync("authz.roles", ["Deny"]);
+
+        await using TestApp without = await StartAsync(configure: a => a.SuperAdminUsers.Clear(), services: s => s.AddSingleton<IResourcePolicyStore>(store), dashboard: true);
+        await using TestApp with = await StartAsync(services: s => s.AddSingleton<IResourcePolicyStore>(store), dashboard: true);
+        TestUser first = await without.CreateUserWithPermissionsAsync("rita", "authz.roles.read");
+        TestUser second = await with.CreateUserWithPermissionsAsync("rita", "authz.roles.read");
+
+        Assert.Equal(HttpStatusCode.OK, await without.CreateClient(first).GetStatusAsync("/authz/Roles"));
+        Assert.Equal(HttpStatusCode.Forbidden, await with.CreateClient(second).GetStatusAsync("/authz/Roles"));
     }
 
     /// <summary>
@@ -326,9 +436,11 @@ public sealed class ResourcePolicyTests
         Action<WebApplication>? endpoints = null,
         Action<DynamicAuthorizationOptions>? configure = null,
         Action<IServiceCollection>? services = null,
-        string[]? assignable = null) =>
+        string[]? assignable = null,
+        bool dashboard = false) =>
         TestApp.StartAsync(o =>
         {
+            o.Dashboard = dashboard;
             o.Authorization = a =>
             {
                 foreach (string name in assignable ?? ["Allow", "Deny", "RequireMfa", "Nested", "Counted"])
@@ -348,7 +460,8 @@ public sealed class ResourcePolicyTests
                     .AddPolicy("Recursive", p => p.RequireAuthenticatedUser().AddRequirements(new DynamicPermissionRequirement()))
                     .AddPolicy("WithScheme", p => p.AddAuthenticationSchemes(TestAuthHandler.SchemeName).RequireAuthenticatedUser())
                     .AddPolicy("Nested", p => p.AddRequirements(new NestedRequirement()))
-                    .AddPolicy("Counted", p => p.AddRequirements(new CountedRequirement()));
+                    .AddPolicy("Counted", p => p.AddRequirements(new CountedRequirement()))
+                    .AddPolicy("FilterOnly", p => p.RequireAssertion(c => c.Resource is AuthorizationFilterContext));
                 s.TryAddSingleton<PolicyCounter>();
                 s.AddSingleton<IAuthorizationHandler, NestedHandler>();
                 s.AddSingleton<IAuthorizationHandler, CountedHandler>();
@@ -393,29 +506,44 @@ public sealed class ResourcePolicyTests
     /// </summary>
     private sealed class PolicyCounter
     {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _count;
 
         public int Count => Volatile.Read(ref _count);
 
         public bool[] Results { get; init; } = [true];
 
-        public bool Next()
+        /// <summary>
+        ///   Gets a value indicating whether evaluations wait for <see cref="Release"/>.
+        /// </summary>
+        public bool Gated { get; init; }
+
+        public Task Started => _started.Task;
+
+        public void Release() => _gate.TrySetResult();
+
+        public async Task<bool> NextAsync()
         {
             int index = Interlocked.Increment(ref _count) - 1;
+            _started.TrySetResult();
+            if (Gated)
+            {
+                await _gate.Task;
+            }
+
             return Results[Math.Min(index, Results.Length - 1)];
         }
     }
 
     private sealed class CountedHandler(PolicyCounter counter) : AuthorizationHandler<CountedRequirement>
     {
-        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, CountedRequirement requirement)
+        protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, CountedRequirement requirement)
         {
-            if (counter.Next())
+            if (await counter.NextAsync())
             {
                 context.Succeed(requirement);
             }
-
-            return Task.CompletedTask;
         }
     }
 

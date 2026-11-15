@@ -46,14 +46,18 @@ internal sealed partial class DynamicPermissionHandler(
 
         // A request to a permission-checked endpoint must also pass the policies assigned to the endpoint's resource.
         // Explicit permissions, endpoints on their own (the secure-content tag helper) and code checks are not affected.
+        // Super admins skip them; the built-in checker has already said whether the user is one, so they never depend
+        // on the assignments being readable.
         if (request is not null
             && requested is { Protection: EndpointProtection.DynamicPermission, Resource: not null }
             && resourcePolicies.IsEnabled
+            && decision is PermissionDecision.GrantedByRole
             && !await resourcePolicies.AuthorizeAsync(
                 request,
+                context.Resource,
                 context.User,
                 requested,
-                ct => IsSuperAdminAsync(context.User, permission, decision.Value, ct),
+                ct => IsSuperAdminAsync(context.User, permission, ct),
                 cancellationToken).ConfigureAwait(false))
         {
             return;
@@ -63,15 +67,18 @@ internal sealed partial class DynamicPermissionHandler(
     }
 
     /// <summary>
-    ///   Tells whether a user whose permission was granted is a super admin. The built-in checker already said so; an
-    ///   application's own checker is asked for the full evaluation, which only happens when policies are assigned.
+    ///   Tells whether a user whose permission was granted by roles is a super admin after all. The built-in checker has
+    ///   already said no; an application's own checker only answers granted or not, so it is asked for the full
+    ///   evaluation, which only happens when the resource has assigned policies.
     /// </summary>
-    private async Task<bool> IsSuperAdminAsync(ClaimsPrincipal user, string permission, PermissionDecision decision, CancellationToken cancellationToken)
+    private async Task<bool> IsSuperAdminAsync(ClaimsPrincipal user, string permission, CancellationToken cancellationToken)
     {
-        if (permissionChecker is not PermissionChecker)
+        if (permissionChecker is PermissionChecker)
         {
-            decision = (await permissionChecker.EvaluateAsync(user, permission, cancellationToken).ConfigureAwait(false)).Decision;
+            return false;
         }
+
+        PermissionDecision decision = (await permissionChecker.EvaluateAsync(user, permission, cancellationToken).ConfigureAwait(false)).Decision;
 
         return decision is PermissionDecision.SuperAdminRole or PermissionDecision.SuperAdminUser;
     }

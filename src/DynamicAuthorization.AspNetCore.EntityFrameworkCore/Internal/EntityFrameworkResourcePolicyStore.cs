@@ -36,14 +36,27 @@ internal sealed class EntityFrameworkResourcePolicyStore<TContext>(TContext cont
         List<string> desired = NormalizeNames(policyNames);
         DbSet<ResourcePolicy> set = context.ResourcePolicies();
 
-        // Deleting first takes the write locks, so a concurrent replacement waits for this one and the last commit wins;
-        // readers see the committed policies from before or after, never the empty set in between.
+        // Readers see the committed policies from before or after a replacement, never the empty set in between. The
+        // transaction is serializable so that two replacements of one resource never both commit their rows: deleting
+        // no rows takes no row locks under READ COMMITTED, so two first assignments of a resource could otherwise both
+        // insert and leave the union of the two. A concurrent replacement then waits for this one, or fails with the
+        // provider's serialization error, so the last commit wins.
         await context.ExecuteInTransactionAsync(
             async ct =>
             {
                 IEnumerable<string> added = desired;
                 if (context.Database.IsRelational())
                 {
+                    // Rows of the resource that this context tracks, from an earlier replacement or read, are deleted below
+                    // without the change tracker knowing; stop tracking them so that their replacements can be added.
+                    foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<ResourcePolicy> tracked in context.ChangeTracker
+                        .Entries<ResourcePolicy>()
+                        .Where(e => string.Equals(e.Entity.Resource, key, StringComparison.Ordinal))
+                        .ToList())
+                    {
+                        tracked.State = EntityState.Detached;
+                    }
+
                     await set.Where(p => p.Resource == key).ExecuteDeleteAsync(ct).ConfigureAwait(false);
                 }
                 else
@@ -62,7 +75,8 @@ internal sealed class EntityFrameworkResourcePolicyStore<TContext>(TContext cont
 
                 return ManagementResult.Ok();
             },
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            System.Data.IsolationLevel.Serializable).ConfigureAwait(false);
     }
 
     private static string NormalizeResource(string resource)

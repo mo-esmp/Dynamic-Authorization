@@ -144,6 +144,42 @@ public sealed class ResourcePolicyStoreTests
         }
     }
 
+    /// <summary>
+    ///   Rows a context tracks, from an earlier replacement in the same scope, do not prevent the next replacement.
+    /// </summary>
+    [Fact]
+    public async Task Replacements_can_be_repeated_in_one_scope()
+    {
+        await using TestApp app = await TestApp.StartAsync();
+
+        IReadOnlyDictionary<string, IReadOnlySet<string>> assignments = await app.WithScopeAsync(async s =>
+        {
+            IResourcePolicyStore store = s.GetRequiredService<IResourcePolicyStore>();
+            await store.SetPoliciesAsync("orders", ["RequireMfa"]);
+            await store.SetPoliciesAsync("orders", ["RequireMfa"]);
+            await store.SetPoliciesAsync("orders", ["BusinessHours", "RequireMfa"]);
+            return await store.GetAssignmentsAsync();
+        });
+
+        Assert.Equal(["BusinessHours", "RequireMfa"], assignments["orders"].Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    ///   Under READ COMMITTED, deleting no rows takes no row locks, so two first assignments of a resource could both
+    ///   commit and leave the union of the two. Replacements run serializable instead.
+    /// </summary>
+    [Fact]
+    public async Task Replacements_run_in_a_serializable_transaction()
+    {
+        IsolationRecorder recorder = new();
+        await using TestApp app = await TestApp.StartAsync(o => o.DbContext = b => b.AddInterceptors(recorder));
+        recorder.Levels.Clear(); // creating the database starts transactions of its own
+
+        await SetAsync(app, "orders", "BusinessHours");
+
+        Assert.Equal([System.Data.IsolationLevel.Serializable], recorder.Levels);
+    }
+
     [Fact]
     public async Task Store_explains_how_to_enable_the_table()
     {
@@ -176,6 +212,28 @@ public sealed class ResourcePolicyStoreTests
 
     private static Task<IReadOnlyDictionary<string, IReadOnlySet<string>>> GetAsync(TestApp app) =>
         app.WithScopeAsync(s => s.GetRequiredService<IResourcePolicyStore>().GetAssignmentsAsync());
+
+    /// <summary>
+    ///   Records the isolation level of the transactions a context starts.
+    /// </summary>
+    private sealed class IsolationRecorder : Microsoft.EntityFrameworkCore.Diagnostics.DbTransactionInterceptor
+    {
+        public List<System.Data.IsolationLevel> Levels { get; } = [];
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbTransaction>> TransactionStartingAsync(
+            System.Data.Common.DbConnection connection,
+            Microsoft.EntityFrameworkCore.Diagnostics.TransactionStartingEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbTransaction> result,
+            CancellationToken cancellationToken = default)
+        {
+            lock (Levels)
+            {
+                Levels.Add(eventData.IsolationLevel);
+            }
+
+            return base.TransactionStartingAsync(connection, eventData, result, cancellationToken);
+        }
+    }
 
     private sealed class OptedOutDbContext(DbContextOptions<OptedOutDbContext> options) : IdentityDbContext(options)
     {
