@@ -1,0 +1,107 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Policies";
+}
+
+<div class="da-page-header">
+    <div>
+        <h1>Policies</h1>
+        <p>
+            Assign authorization policies to resources. Every request to a resource must pass its policies, in addition to
+            its permission. Super admins skip them.
+        </p>
+    </div>
+</div>
+
+@if (Model.Assignments.Orphaned.Count > 0)
+{
+    <div class="da-alert da-alert-warning" role="status">
+        @DashboardIcons.Warning
+        <div>
+            Policies are assigned to resources that no longer have permission-checked endpoints:
+            @foreach (ResourcePolicySummary orphan in Model.Assignments.Orphaned)
+            {
+                <span class="da-chip">
+                    <span class="da-mono">@orphan.Resource</span>
+                    <secure-content asp-page="Index" asp-page-handler="Clear">
+                        <form method="post" asp-page-handler="Clear" asp-route-resource="@orphan.Resource" class="da-inline-form"
+                              data-confirm="Remove the policies assigned to '@orphan.Resource'?" data-confirm-title="Remove assignments" data-confirm-button="Remove">
+                            <button type="submit" class="da-button da-button-subtle da-button-small">@DashboardIcons.Delete Remove</button>
+                        </form>
+                    </secure-content>
+                </span>
+            }
+        </div>
+    </div>
+}
+
+<div data-filter-scope>
+    <div class="da-toolbar">
+        <label class="da-search">
+            @DashboardIcons.Search
+            <input class="da-input" type="search" placeholder="Filter resources" aria-label="Filter resources" data-filter-text />
+        </label>
+        <span class="da-count" data-filter-count aria-live="polite"></span>
+    </div>
+
+    <div class="da-grid-wrap">
+        <table class="da-grid">
+            <thead>
+                <tr>
+                    <th scope="col">Resource</th>
+                    <th scope="col" class="da-num">Endpoints</th>
+                    <th scope="col">Policies</th>
+                    <th scope="col"><span hidden>Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (ResourcePolicySummary resource in Model.Assignments.Resources)
+                {
+                    <tr data-row data-search="@($"{resource.DisplayName} {resource.Resource} {string.Join(' ', resource.Enforced)} {string.Join(' ', resource.Skipped)}")">
+                        <td>
+                            @if (Model.CanEdit)
+                            {
+                                <a class="da-link da-cell-title" asp-page="Edit" asp-route-resource="@resource.Resource">@resource.DisplayName</a>
+                            }
+                            else
+                            {
+                                <span class="da-cell-title">@resource.DisplayName</span>
+                            }
+                            <span class="da-cell-sub da-mono">@resource.Resource</span>
+                        </td>
+                        <td class="da-num">@resource.EndpointCount</td>
+                        <td>
+                            @if (resource.Enforced.Count == 0 && resource.Skipped.Count == 0)
+                            {
+                                <span class="da-subtle">None</span>
+                            }
+                            else
+                            {
+                                <span class="da-badges">
+                                    @foreach (string policy in resource.Enforced)
+                                    {
+                                        <span class="da-badge da-badge-accent" data-policy="@policy">@DashboardIcons.Lock @policy</span>
+                                    }
+                                    @foreach (string policy in resource.Skipped)
+                                    {
+                                        <span class="da-badge da-badge-warning" data-skipped-policy="@policy" title="No longer registered as assignable, so it is not enforced">@policy (skipped)</span>
+                                    }
+                                </span>
+                            }
+                        </td>
+                        <td class="da-actions">
+                            @if (Model.CanEdit)
+                            {
+                                <a class="da-button da-button-subtle da-button-small" asp-page="Edit" asp-route-resource="@resource.Resource">@DashboardIcons.Edit Edit</a>
+                            }
+                        </td>
+                    </tr>
+                }
+                <tr data-filter-empty hidden>
+                    <td colspan="4" class="da-empty">No resources match the filter.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>

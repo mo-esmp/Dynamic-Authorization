@@ -17,6 +17,8 @@ internal static class DashboardConstants
     public const string RolesResource = "authz.roles";
     public const string UsersResource = "authz.users";
     public const string AccessResource = "authz.access";
+    public const string PoliciesResource = "authz.policies";
+    public const string PoliciesFolder = "/Policies";
     public const string StatusKey = "DynamicAuthorization.Status";
     public const string ErrorKey = "DynamicAuthorization.Error";
 }
@@ -28,14 +30,23 @@ internal static class DashboardConstants
 internal sealed class DashboardMarker;
 
 /// <summary>
-///   Serves the dashboard pages under the configured prefix and protects them with the configured policy.
+///   Serves the dashboard pages under the configured prefix and protects them with the configured policy. The pages
+///   that assign policies to resources get no route while no policy is assignable, so they do not exist: no request
+///   reaches them and the catalog lists no permission for them.
 /// </summary>
-internal sealed class ConfigureDashboardPages(IOptions<DashboardOptions> dashboardOptions) : IConfigureOptions<RazorPagesOptions>
+internal sealed class ConfigureDashboardPages(
+    IOptions<DashboardOptions> dashboardOptions,
+    IOptions<DynamicAuthorizationOptions> authorizationOptions) : IConfigureOptions<RazorPagesOptions>
 {
     public void Configure(RazorPagesOptions options)
     {
         DashboardOptions dashboard = dashboardOptions.Value;
         string prefix = dashboard.NormalizedRoutePrefix;
+
+        if (authorizationOptions.Value.AssignablePolicies.Count == 0)
+        {
+            options.Conventions.AddAreaFolderRouteModelConvention(DashboardConstants.AreaName, DashboardConstants.PoliciesFolder, model => model.Selectors.Clear());
+        }
 
         options.Conventions.AddAreaFolderRouteModelConvention(DashboardConstants.AreaName, "/", model =>
         {

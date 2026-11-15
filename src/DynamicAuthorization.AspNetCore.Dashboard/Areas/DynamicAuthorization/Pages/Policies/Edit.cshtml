@@ -1,0 +1,72 @@
+@page "{resource}"
+@model EditModel
+@{
+    ViewData["Title"] = Model.Resource.DisplayName;
+    HashSet<string> selected = new(Model.PolicyNames, StringComparer.OrdinalIgnoreCase);
+}
+
+<div class="da-breadcrumb">
+    <a asp-page="Index">Policies</a>
+    @DashboardIcons.ChevronRight
+    <span>@Model.Resource.DisplayName</span>
+</div>
+<div class="da-page-header">
+    <div>
+        <h1>@Model.Resource.DisplayName</h1>
+        <p>
+            Choose the policies that every request to <span class="da-mono">@Model.Resource.Resource</span>
+            (@Model.Resource.EndpointCount @(Model.Resource.EndpointCount == 1 ? "endpoint" : "endpoints")) must pass, in addition
+            to its permission. Super admins skip them.
+        </p>
+    </div>
+</div>
+
+@if (Model.NeedsSuperAdmin)
+{
+    <div class="da-alert da-alert-warning" role="status">
+        @DashboardIcons.Warning
+        <div>
+            This is one of the dashboard's own resources. Policies can only be assigned to it while a super admin user or role is
+            configured, so that a policy that never passes cannot lock everyone out of the dashboard.
+        </div>
+    </div>
+}
+
+<form method="post" class="da-panel">
+    <div class="da-panel-header">
+        <h2>Policies</h2>
+    </div>
+    <div class="da-panel-body da-form">
+        <div asp-validation-summary="ModelOnly" class="da-alert da-alert-danger" role="alert">@DashboardIcons.DismissCircle</div>
+        <div class="da-choice-list" role="group" aria-label="Policies">
+            @foreach (AssignablePolicyDefinition policy in Model.Policies)
+            {
+                <label class="da-choice">
+                    <input type="checkbox" class="da-check" name="PolicyNames" value="@policy.Name" checked="@selected.Contains(policy.Name)" />
+                    <span>
+                        <span class="da-cell-title">@(policy.DisplayName ?? policy.Name)</span>
+                        @if (policy.Description is not null)
+                        {
+                            <span class="da-cell-sub">@policy.Description</span>
+                        }
+                    </span>
+                    <span class="da-subtle da-mono">@policy.Name</span>
+                </label>
+            }
+            @foreach (string skipped in Model.Resource.Skipped)
+            {
+                <label class="da-choice">
+                    <input type="checkbox" class="da-check" name="PolicyNames" value="@skipped" checked="@selected.Contains(skipped)" />
+                    <span>
+                        <span class="da-cell-title">@skipped</span>
+                        <span class="da-cell-sub">No longer registered as assignable, so it is skipped. Clear it to remove the assignment.</span>
+                    </span>
+                    <span class="da-badge da-badge-warning">Skipped</span>
+                </label>
+            }
+        </div>
+        <div>
+            <button type="submit" class="da-button da-button-primary">Save policies</button>
+        </div>
+    </div>
+</form>
