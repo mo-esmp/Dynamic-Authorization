@@ -1,5 +1,6 @@
 ﻿using DynamicAuthorization.AspNetCore.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace DynamicAuthorization.AspNetCore.Tests;
@@ -82,9 +83,13 @@ public sealed class ResourcePolicyOptionsTests
     [Fact]
     public async Task Registered_names_are_looked_up_ignoring_case()
     {
-        await using TestApp app = await TestApp.StartAsync(o => o.Authorization = a => a
-            .AddAssignablePolicy("BusinessHours")
-            .AddAssignablePolicy("RequireMfa"));
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Services = s => s.AddSingleton<IResourcePolicyStore, InMemoryResourcePolicyStore>();
+            o.Authorization = a => a
+                .AddAssignablePolicy("BusinessHours")
+                .AddAssignablePolicy("RequireMfa");
+        });
 
         AssignablePolicyRegistry registry = app.Services.GetRequiredService<AssignablePolicyRegistry>();
 
@@ -92,6 +97,40 @@ public sealed class ResourcePolicyOptionsTests
         Assert.True(registry.IsRegistered("businesshours"));
         Assert.True(registry.IsRegistered("REQUIREMFA"));
         Assert.False(registry.IsRegistered("Other"));
+    }
+
+    [Fact]
+    public async Task Assignable_policies_without_a_store_are_rejected_at_startup()
+    {
+        OptionsValidationException exception = await Assert.ThrowsAsync<OptionsValidationException>(() =>
+            TestApp.StartAsync(o =>
+            {
+                o.Services = s => s.RemoveAll<IResourcePolicyStore>();
+                o.Authorization = a => a.AddAssignablePolicy("BusinessHours");
+            }));
+
+        Assert.Contains(nameof(IResourcePolicyStore), exception.Message, StringComparison.Ordinal);
+        Assert.Contains("AddEntityFrameworkStore", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task No_store_is_needed_while_no_policy_is_assignable()
+    {
+        await using TestApp app = await TestApp.StartAsync(o => o.Services = s => s.RemoveAll<IResourcePolicyStore>());
+
+        Assert.Null(app.Services.GetService<IResourcePolicyStore>());
+    }
+
+    [Fact]
+    public async Task Any_registered_store_satisfies_the_startup_check()
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Services = s => s.AddSingleton<IResourcePolicyStore, InMemoryResourcePolicyStore>();
+            o.Authorization = a => a.AddAssignablePolicy("BusinessHours");
+        });
+
+        Assert.IsType<InMemoryResourcePolicyStore>(app.Services.GetRequiredService<IResourcePolicyStore>());
     }
 
     [Fact]
