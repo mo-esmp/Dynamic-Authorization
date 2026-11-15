@@ -34,7 +34,21 @@ public sealed class DynamicAuthorizationModelOptions
     public string TableName { get; set; } = "AspNetRolePermissions";
 
     /// <summary>
-    ///   Gets or sets the schema of the role permissions table. Defaults to the model's default schema.
+    ///   Gets or sets the schema of the dynamic authorization tables. Defaults to the model's default schema.
     /// </summary>
     public string? Schema { get; set; }
+
+    /// <summary>
+    ///   Gets or sets a value indicating whether the table that stores the authorization policies assigned to resources
+    ///   is added to the model. Enable it, and add a migration, to let admins assign the policies registered with
+    ///   <c>DynamicAuthorizationOptions.AddAssignablePolicy</c>. Defaults to <see langword="false"/>, so that applications
+    ///   that don't assign policies have no table to migrate.
+    /// </summary>
+    public bool ResourcePolicies { get; set; }
+
+    /// <summary>
+    ///   Gets or sets the name of the table that stores the policies assigned to resources. Defaults to
+    ///   <c>AspNetResourcePolicies</c>.
+    /// </summary>
+    public string ResourcePolicyTableName { get; set; } = "AspNetResourcePolicies";
 }
