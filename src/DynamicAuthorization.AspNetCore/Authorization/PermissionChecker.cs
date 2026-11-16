@@ -53,6 +53,22 @@ internal sealed class PermissionChecker(
         return evaluation.IsGranted;
     }
 
+    /// <summary>
+    ///   Decides a permission like <see cref="HasPermissionAsync"/>, at the same cost, and tells how it was decided,
+    ///   for example that the user is a super admin.
+    /// </summary>
+    /// <param name="user">The principal.</param>
+    /// <param name="permission">The permission key.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The decision.</returns>
+    internal async Task<PermissionDecision> DecideAsync(ClaimsPrincipal user, string permission, CancellationToken cancellationToken = default)
+    {
+        PermissionEvaluation evaluation =
+            await EvaluateCoreAsync(user, permission, stopAtFirstGrant: true, cancellationToken).ConfigureAwait(false);
+
+        return evaluation.Decision;
+    }
+
     /// <inheritdoc />
     /// <remarks>
     ///   Every granting role is collected, so that <see cref="PermissionEvaluation.GrantingRoles"/> is complete.

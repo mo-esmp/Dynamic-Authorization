@@ -10,8 +10,10 @@ namespace DynamicAuthorization.AspNetCore;
 ///   invalidation during a load removes the entry before the result is published. The permissions of several roles
 ///   that are not cached are loaded together.
 /// </summary>
-internal sealed class MemoryDynamicAuthorizationCacheStore : IDynamicAuthorizationCacheStore, IDisposable
+internal sealed class MemoryDynamicAuthorizationCacheStore : IDynamicAuthorizationCacheStore, IResourcePolicyCacheStore, IDisposable
 {
+    private const string ResourcePoliciesKey = "resource-policies";
+
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
 
     // Entry creation is serialized so that concurrent misses, for one key or for a batch of keys, share a single load.
@@ -107,6 +109,28 @@ internal sealed class MemoryDynamicAuthorizationCacheStore : IDynamicAuthorizati
         }
 
         return new CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>(permissions, expiresAt);
+    }
+
+    public async ValueTask<CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>> GetResourcePoliciesAsync(
+        Func<CancellationToken, Task<IReadOnlyDictionary<string, IReadOnlySet<string>>>> load,
+        CancellationToken cancellationToken)
+    {
+        Entry<IReadOnlyDictionary<string, IReadOnlySet<string>>> entry;
+        lock (_registration)
+        {
+            entry = GetOrAddLoad(ResourcePoliciesKey, () => load(CancellationToken.None), Lifetime);
+        }
+
+        return new CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>(
+            await entry.Load.Value.WaitAsync(cancellationToken).ConfigureAwait(false),
+            entry.ExpiresAt);
+    }
+
+    public ValueTask InvalidateResourcePoliciesAsync(CancellationToken cancellationToken)
+    {
+        _cache.Remove(ResourcePoliciesKey);
+
+        return ValueTask.CompletedTask;
     }
 
     public ValueTask InvalidateUserAsync(string userId, CancellationToken cancellationToken)

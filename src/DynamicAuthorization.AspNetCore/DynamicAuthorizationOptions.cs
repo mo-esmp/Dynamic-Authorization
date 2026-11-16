@@ -82,6 +82,34 @@ public sealed class DynamicAuthorizationOptions
 
         return this;
     }
+
+    /// <summary>
+    ///   Gets the authorization policies that admins may assign to resources in the dashboard. Every request to a
+    ///   permission-checked endpoint must then pass the policies assigned to the endpoint's resource, in addition to its
+    ///   permission. Nothing is assigned, and nothing is read from the store, while this list is empty.
+    /// </summary>
+    /// <remarks>
+    ///   The policies themselves are defined as usual, for example with <c>AuthorizationOptions.AddPolicy</c>, and are
+    ///   resolved by name through the <c>IAuthorizationPolicyProvider</c> when a request is authorized. Names are compared
+    ///   ignoring case. Removing a registration stops enforcing the assignments of that policy, which are kept and apply
+    ///   again if the policy is registered again.
+    /// </remarks>
+    public IList<AssignablePolicyDefinition> AssignablePolicies { get; } = [];
+
+    /// <summary>
+    ///   Allows admins to assign an authorization policy to resources in the dashboard.
+    /// </summary>
+    /// <param name="name">The name of the policy, as registered with <c>AuthorizationOptions.AddPolicy</c>.</param>
+    /// <param name="displayName">The display name shown in the dashboard; defaults to the name.</param>
+    /// <param name="description">A description shown in the dashboard, for example what the policy requires.</param>
+    /// <returns>The same options instance so that multiple calls can be chained.</returns>
+    public DynamicAuthorizationOptions AddAssignablePolicy(string name, string? displayName = null, string? description = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        AssignablePolicies.Add(new AssignablePolicyDefinition(name.Trim(), displayName, description));
+
+        return this;
+    }
 }
 
 /// <summary>
@@ -91,3 +119,17 @@ public sealed class DynamicAuthorizationOptions
 /// <param name="DisplayName">The display name shown in the dashboard.</param>
 /// <param name="Group">The group the permission is listed under in the dashboard.</param>
 public sealed record PermissionDefinition(string Permission, string? DisplayName = null, string? Group = null);
+
+/// <summary>
+///   An authorization policy that admins may assign to resources.
+/// </summary>
+/// <param name="Name">The name of the policy, as registered with <c>AuthorizationOptions.AddPolicy</c>.</param>
+/// <param name="DisplayName">The display name shown in the dashboard; defaults to the name.</param>
+/// <param name="Description">A description shown in the dashboard.</param>
+public sealed record AssignablePolicyDefinition(string Name, string? DisplayName = null, string? Description = null)
+{
+    /// <summary>
+    ///   The maximum length of a policy name.
+    /// </summary>
+    public const int MaxNameLength = 256;
+}

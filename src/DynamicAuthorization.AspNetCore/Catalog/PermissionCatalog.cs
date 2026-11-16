@@ -80,7 +80,20 @@ public sealed record EndpointAuthorizationInfo(
     EndpointProtection Protection,
     string TargetKey,
     PermissionDescriptor? Permission,
-    string? Handler = null);
+    string? Handler = null)
+{
+    /// <summary>
+    ///   Gets the key of the resource the endpoint belongs to: its controller (with its area), its page folder, or the
+    ///   first segment of its route, unless <see cref="PermissionResourceAttribute"/> or <c>WithPermissionResource</c>
+    ///   names another one. For example, <c>orders</c> for <c>OrdersController</c>, the <c>/Orders</c> pages and
+    ///   <c>/api/orders</c>.
+    /// </summary>
+    /// <remarks>
+    ///   This is the resource of the endpoint, not of the permission it requires: an action of <c>OrdersController</c>
+    ///   with <c>[Permission("reports.export")]</c> belongs to <c>orders</c>. It is set under both permission conventions.
+    /// </remarks>
+    public string? Resource { get; init; }
+}
 
 /// <summary>
 ///   The permissions and endpoints discovered in the application.
@@ -90,6 +103,7 @@ public sealed class PermissionCatalog
     private readonly Dictionary<string, PermissionDescriptor> _permissions;
     private readonly ILookup<string, EndpointAuthorizationInfo> _endpointsByTarget;
     private readonly ILookup<string, EndpointAuthorizationInfo> _endpointsByPermission;
+    private readonly ILookup<string, EndpointAuthorizationInfo> _endpointsByResource;
 
     /// <summary>
     ///   Initializes a new instance of the <see cref="PermissionCatalog"/> class.
@@ -108,6 +122,9 @@ public sealed class PermissionCatalog
         _endpointsByPermission = Endpoints
             .Where(e => e.Permission is not null)
             .ToLookup(e => e.Permission!.Permission, StringComparer.OrdinalIgnoreCase);
+        _endpointsByResource = Endpoints
+            .Where(e => e.Resource is not null)
+            .ToLookup(e => e.Resource!, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -134,6 +151,14 @@ public sealed class PermissionCatalog
     /// <param name="permission">The permission key.</param>
     /// <returns>The endpoints.</returns>
     public IEnumerable<EndpointAuthorizationInfo> GetEndpoints(string permission) => _endpointsByPermission[permission];
+
+    /// <summary>
+    ///   Gets the endpoints that belong to a resource, see <see cref="EndpointAuthorizationInfo.Resource"/>, whatever
+    ///   their protection. The resource key is compared ignoring case.
+    /// </summary>
+    /// <param name="resource">The resource key, for example <c>orders</c>.</param>
+    /// <returns>The endpoints.</returns>
+    public IEnumerable<EndpointAuthorizationInfo> GetResourceEndpoints(string resource) => _endpointsByResource[resource];
 
     /// <summary>
     ///   Finds the endpoint of an MVC action, Razor Page or route by its target key. When several entries share the

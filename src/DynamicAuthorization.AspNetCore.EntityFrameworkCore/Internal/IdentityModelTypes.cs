@@ -83,6 +83,19 @@ internal static class DbContextExtensions
         return context.Set<RolePermission<TKey>>();
     }
 
+    public static DbSet<ResourcePolicy> ResourcePolicies(this DbContext context)
+    {
+        if (context.Model.FindEntityType(typeof(ResourcePolicy)) is null)
+        {
+            throw new InvalidOperationException(
+                $"The resource policy entity is not part of the model of '{context.GetType().Name}', but policies are assignable. " +
+                "Call modelBuilder.EnableDynamicAuthorization(o => o.ResourcePolicies = true) in OnModelCreating and add a migration " +
+                "to create the table, or remove the AddAssignablePolicy registrations.");
+        }
+
+        return context.Set<ResourcePolicy>();
+    }
+
     /// <summary>
     ///   Runs an operation in a transaction that is committed only when the operation succeeds. Uses the context's
     ///   execution strategy so that retrying providers work, and joins an existing transaction when there is one.

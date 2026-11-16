@@ -29,6 +29,12 @@ internal sealed class AccessModel : DashboardPageModel
 
     public IReadOnlyList<EndpointAuthorizationInfo> Endpoints { get; private set; } = [];
 
+    /// <summary>
+    ///   Gets the resources of the endpoints that require the permission which have policies assigned. Requests to them
+    ///   must also pass those policies, which depend on the request and are not evaluated here.
+    /// </summary>
+    public IReadOnlyList<ResourcePolicySummary> AssignedPolicies { get; private set; } = [];
+
     public string Explanation => Evaluation?.Decision switch
     {
         PermissionDecision.SuperAdminUser => "The user is listed in the super admin users, so every permission is granted.",
@@ -68,5 +74,12 @@ internal sealed class AccessModel : DashboardPageModel
         Descriptor = Catalog.FindPermission(Permission);
         Endpoints = [.. Catalog.GetEndpoints(Permission)];
         Evaluation = await GetService<IPermissionChecker>().EvaluateUserAsync(Subject.Id, Subject.UserName, Permission, cancellationToken);
+
+        if (await GetResourcePolicyAssignmentsAsync(cancellationToken) is { } assignments)
+        {
+            HashSet<string> resources = [with(StringComparer.OrdinalIgnoreCase),
+                .. Endpoints.Where(e => e.Protection == EndpointProtection.DynamicPermission && e.Resource is not null).Select(e => e.Resource!)];
+            AssignedPolicies = [.. assignments.Resources.Where(r => resources.Contains(r.Resource) && (r.Enforced.Count > 0 || r.Skipped.Count > 0))];
+        }
     }
 }

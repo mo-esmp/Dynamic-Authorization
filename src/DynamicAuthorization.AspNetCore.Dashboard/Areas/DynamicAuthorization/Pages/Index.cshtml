@@ -77,6 +77,30 @@
                     <div>And @(Model.OrphanedGrantCount - Model.OrphanedGrants.Count) more granted permissions that match nothing in this application.</div>
                 </li>
             }
+            @foreach (ResourcePolicySummary orphan in Model.OrphanedPolicies)
+            {
+                <li class="da-list-warning" data-orphaned-policies="@orphan.Resource">
+                    @DashboardIcons.Warning
+                    <div>
+                        <a class="da-link" href="@(Model.CanViewPolicies ? Url.Page("/Policies/Index", new { area = DashboardConstants.AreaName }) : null)">
+                            Policies are assigned to <span class="da-mono">@orphan.Resource</span>, which no longer has permission-checked endpoints
+                        </a>
+                        <div class="da-cell-sub">@string.Join(", ", orphan.Enforced.Concat(orphan.Skipped)). Remove them on the Policies page.</div>
+                    </div>
+                </li>
+            }
+            @foreach (ResourcePolicySummary resource in Model.SkippedPolicies)
+            {
+                <li class="da-list-warning" data-skipped-policies="@resource.Resource">
+                    @DashboardIcons.Warning
+                    <div>
+                        <a class="da-link" href="@(Model.CanViewPolicies ? Url.Page("/Policies/Index", new { area = DashboardConstants.AreaName }) : null)">
+                            @resource.Skipped.Count @(resource.Skipped.Count == 1 ? "policy assigned" : "policies assigned") to @resource.DisplayName @(resource.Skipped.Count == 1 ? "is" : "are") skipped
+                        </a>
+                        <div class="da-cell-sub">@string.Join(", ", resource.Skipped) @(resource.Skipped.Count == 1 ? "is" : "are") no longer registered with AddAssignablePolicy, so @(resource.Skipped.Count == 1 ? "it is" : "they are") not enforced.</div>
+                    </div>
+                </li>
+            }
             @if (Model.RolesWithoutUsers.Count > 0)
             {
                 <li class="da-list-info">

@@ -16,8 +16,13 @@ namespace DynamicAuthorization.AspNetCore;
 internal sealed class DynamicAuthorizationCache(
     IDynamicAuthorizationCacheStore store,
     IServiceScopeFactory scopeFactory,
-    IOptions<DynamicAuthorizationOptions> options) : IDynamicAuthorizationCache
+    IOptions<DynamicAuthorizationOptions> options) : IDynamicAuthorizationCache, IDisposable
 {
+    // A cache store that predates resource policies does not keep them: they are kept in the memory of the instance, so
+    // that the store of record is not read on every request.
+    private readonly MemoryDynamicAuthorizationCacheStore? _resourcePolicyFallback =
+        store is IResourcePolicyCacheStore ? null : new MemoryDynamicAuthorizationCacheStore(options);
+
     // The sets a cache keeps are the same instances across reads, so their index is built once per cached set and
     // collected with it. The sets are copies made by the load, so a store that returns a set it keeps and changes
     // cannot make an index outdated.
@@ -71,6 +76,28 @@ internal sealed class DynamicAuthorizationCache(
         return new CachedValue<IReadOnlyList<PermissionSet>>(permissions, cached.ExpiresAt);
     }
 
+    /// <summary>
+    ///   Gets the policies assigned to resources, keyed by resource. Keys and names compare ignoring case.
+    /// </summary>
+    public async ValueTask<CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>> GetResourcePoliciesAsync(CancellationToken cancellationToken)
+    {
+        if (!Enabled)
+        {
+            return new CachedValue<IReadOnlyDictionary<string, IReadOnlySet<string>>>(
+                await LoadResourcePoliciesAsync(cancellationToken).ConfigureAwait(false), DateTimeOffset.UtcNow);
+        }
+
+        return await ResourcePolicyStore.GetResourcePoliciesAsync(LoadResourcePoliciesAsync, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask InvalidateResourcePoliciesAsync(CancellationToken cancellationToken = default)
+    {
+        await ResourcePolicyStore.InvalidateResourcePoliciesAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _version);
+    }
+
+    public void Dispose() => _resourcePolicyFallback?.Dispose();
+
     public async ValueTask InvalidateUserAsync(string userId, CancellationToken cancellationToken = default)
     {
         await store.InvalidateUserAsync(userId, cancellationToken).ConfigureAwait(false);
@@ -86,8 +113,38 @@ internal sealed class DynamicAuthorizationCache(
     public async ValueTask InvalidateAllAsync(CancellationToken cancellationToken = default)
     {
         await store.InvalidateAllAsync(cancellationToken).ConfigureAwait(false);
+        if (_resourcePolicyFallback is not null)
+        {
+            await _resourcePolicyFallback.InvalidateResourcePoliciesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         Interlocked.Increment(ref _version);
     }
+
+    private IResourcePolicyCacheStore ResourcePolicyStore => _resourcePolicyFallback ?? (IResourcePolicyCacheStore)store;
+
+    /// <summary>
+    ///   Loads every assignment from the store of record. The sets are copied, so that what is cached belongs to this
+    ///   load, and compare ignoring case as the contract says; resources without policies are left out.
+    /// </summary>
+    private Task<IReadOnlyDictionary<string, IReadOnlySet<string>>> LoadResourcePoliciesAsync(CancellationToken cancellationToken) =>
+        ExecuteAsync<IReadOnlyDictionary<string, IReadOnlySet<string>>>(async services =>
+        {
+            IReadOnlyDictionary<string, IReadOnlySet<string>> loaded = await services.GetRequiredService<IResourcePolicyStore>()
+                .GetAssignmentsAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            Dictionary<string, IReadOnlySet<string>> assignments = new(loaded.Count, StringComparer.OrdinalIgnoreCase);
+            foreach ((string resource, IReadOnlySet<string> policies) in loaded)
+            {
+                if (policies.Count > 0)
+                {
+                    assignments[resource] = new HashSet<string>(policies, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+
+            return assignments;
+        }, cancellationToken);
 
     private Task<IReadOnlyList<RoleReference>> LoadRolesAsync(string userId, CancellationToken cancellationToken) =>
         ExecuteAsync(services => services.GetRequiredService<IUserRoleProvider>().GetUserRolesAsync(userId, cancellationToken), cancellationToken);

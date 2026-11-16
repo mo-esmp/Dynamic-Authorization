@@ -1,6 +1,7 @@
 @using Microsoft.Extensions.Hosting
 @using Microsoft.Extensions.Options
 @inject IOptions<DashboardOptions> DashboardOptionsAccessor
+@inject IOptions<DynamicAuthorizationOptions> AuthorizationOptionsAccessor
 @inject DashboardAssets Assets
 @inject IHostEnvironment HostEnvironment
 @{
@@ -13,6 +14,9 @@
         ("/Index", "Overview", DashboardIcons.Overview, "/Index"),
         ("/Endpoints", "Endpoints", DashboardIcons.Endpoints, "/Endpoints"),
         ("/Roles/Index", "Roles", DashboardIcons.Shield, "/Roles/"),
+        .. AuthorizationOptionsAccessor.Value.AssignablePolicies.Count > 0
+            ? new[] { ("/Policies/Index", "Policies", DashboardIcons.Lock, "/Policies/") }
+            : [],
         ("/Users/Index", "Users", DashboardIcons.People, "/Users/"),
         ("/Access", "Access check", DashboardIcons.Key, "/Access"),
     ];

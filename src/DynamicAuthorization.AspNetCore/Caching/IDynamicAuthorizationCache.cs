@@ -1,7 +1,7 @@
 ﻿namespace DynamicAuthorization.AspNetCore;
 
 /// <summary>
-///   Invalidates cached role memberships and role permissions.
+///   Invalidates cached role memberships, role permissions and resource policies.
 /// </summary>
 /// <remarks>
 ///   The management services invalidate the cache automatically. Call these methods when roles or permissions are
@@ -30,4 +30,12 @@ public interface IDynamicAuthorizationCache
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     ValueTask InvalidateAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///   Removes the cached policies assigned to resources. Call it after changing an <see cref="IResourcePolicyStore"/>
+    ///   by other means than the management service. Implementations that predate resource policies invalidate
+    ///   everything instead.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    ValueTask InvalidateResourcePoliciesAsync(CancellationToken cancellationToken = default) => InvalidateAllAsync(cancellationToken);
 }

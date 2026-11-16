@@ -186,7 +186,10 @@ internal sealed partial class EndpointAuthorizationResolver
 
         EndpointAuthorizationInfo entry = new(
             endpoint, actionDisplayName ?? action.ActionName, target.Group, route, httpMethods, PermissionSource.Controller, area,
-            protection, target.TargetKey, permission);
+            protection, target.TargetKey, permission)
+        {
+            Resource = target.Resource,
+        };
 
         return new EndpointDescription(entry, [entry]);
     }
@@ -238,7 +241,10 @@ internal sealed partial class EndpointAuthorizationResolver
                 ? CreatePermission(target, pageOverrides, options, () => pageOperation)
                 : null;
             EndpointAuthorizationInfo entry = new(
-                endpoint, displayName, target.Group, route, [], PermissionSource.Page, area, protection, target.TargetKey, permission);
+                endpoint, displayName, target.Group, route, [], PermissionSource.Page, area, protection, target.TargetKey, permission)
+            {
+                Resource = target.Resource,
+            };
 
             return new EndpointDescription(entry, [entry]);
         }
@@ -265,7 +271,10 @@ internal sealed partial class EndpointAuthorizationResolver
                 () => GetHandlerOperation(method, handlerName, pageOperation));
 
             entries.Add(new EndpointAuthorizationInfo(
-                endpoint, displayName, target.Group, route, [method], PermissionSource.Page, area, protection, target.TargetKey, permission, handlerName));
+                endpoint, displayName, target.Group, route, [method], PermissionSource.Page, area, protection, target.TargetKey, permission, handlerName)
+            {
+                Resource = target.Resource,
+            });
         }
 
         // Without an unnamed GET handler, a GET request renders the page without running a handler.
@@ -274,7 +283,10 @@ internal sealed partial class EndpointAuthorizationResolver
         {
             navigation = new EndpointAuthorizationInfo(
                 endpoint, displayName, target.Group, route, [HttpMethods.Get], PermissionSource.Page, area, protection, target.TargetKey,
-                CreatePermission(target, pageKey, options, () => pageOperation));
+                CreatePermission(target, pageKey, options, () => pageOperation))
+            {
+                Resource = target.Resource,
+            };
             entries.Insert(0, navigation);
         }
 
@@ -322,7 +334,10 @@ internal sealed partial class EndpointAuthorizationResolver
             : null;
 
         EndpointAuthorizationInfo entry = new(
-            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, null, protection, target.TargetKey, permission);
+            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, null, protection, target.TargetKey, permission)
+        {
+            Resource = target.Resource,
+        };
 
         return new EndpointDescription(entry, [entry]);
     }

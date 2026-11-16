@@ -68,6 +68,39 @@
         </div>
     </div>
 
+    @if (Model.AssignedPolicies.Count > 0)
+    {
+        <div class="da-alert da-alert-info" data-assigned-policies>
+            @DashboardIcons.Lock
+            <div>
+                Requests to these resources must also pass the policies assigned to them@(evaluation.Decision is PermissionDecision.SuperAdminRole or PermissionDecision.SuperAdminUser ? ", which super admins skip" : string.Empty).
+                They depend on the request, so they are not evaluated here.
+                <ul class="da-list">
+                    @foreach (ResourcePolicySummary resource in Model.AssignedPolicies)
+                    {
+                        <li>
+                            <div>
+                                <strong>@resource.DisplayName</strong> <span class="da-mono da-subtle">@resource.Resource</span>
+                                <span class="da-badges">
+                                    @foreach (string policy in resource.Enforced)
+                                    {
+                                        <span class="da-badge da-badge-accent" data-policy="@policy">@policy</span>
+                                    }
+                                </span>
+                                @if (resource.Skipped.Count > 0)
+                                {
+                                    <div class="da-cell-sub" data-skipped-policies>
+                                        Skipped because they are no longer registered: @string.Join(", ", resource.Skipped)
+                                    </div>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
+
     @if (Model.Endpoints.Count > 0)
     {
         <h2 class="da-section-title">Endpoints that require this permission</h2>

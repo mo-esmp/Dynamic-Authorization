@@ -15,7 +15,22 @@ namespace SampleWebApp.Data.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
+
+            modelBuilder.Entity("DynamicAuthorization.AspNetCore.EntityFrameworkCore.ResourcePolicy", b =>
+                {
+                    b.Property<string>("Resource")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PolicyName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Resource", "PolicyName");
+
+                    b.ToTable("AspNetResourcePolicies", (string)null);
+                });
 
             modelBuilder.Entity("DynamicAuthorization.AspNetCore.EntityFrameworkCore.RolePermission<string>", b =>
                 {

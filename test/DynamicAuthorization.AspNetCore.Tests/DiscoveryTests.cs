@@ -253,4 +253,80 @@ public sealed class DiscoveryTests
     [Fact]
     public void Route_keys_are_normalized() =>
         Assert.Equal("endpoint:GET,POST /api/orders/{id}", PermissionKeys.ForRoute(["post", "GET"], "api/orders/{id}"));
+
+    /// <summary>
+    ///   Every endpoint belongs to a resource: its controller, its page folder or the first segment of its route. Policies
+    ///   assigned to a resource apply to its endpoints whatever permission they require.
+    /// </summary>
+    [Theory]
+    [InlineData(PermissionConvention.Crud)]
+    [InlineData(PermissionConvention.Endpoint)]
+    public async Task Endpoints_describe_the_resource_they_belong_to(PermissionConvention convention)
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Authorization = a => a.Convention = convention;
+            o.Endpoints = e =>
+            {
+                e.MapGet("/api/v2/invoices", () => "invoices").RequireAuthorization();
+                e.MapGet("/api/orders/audit", () => "audit").RequireAuthorization().RequirePermission("reports.export");
+            };
+        });
+
+        PermissionCatalog catalog = app.GetCatalog();
+
+        Assert.Equal("orders", catalog.FindEndpoint("mvc::Orders:Index")?.Resource);
+        Assert.Equal("orders", catalog.FindEndpoint("mvc::Orders:Download")?.Resource);
+        Assert.Equal("admin.settings", catalog.FindEndpoint("mvc:Admin:Settings:Index")?.Resource);
+        Assert.Equal("legacy", catalog.FindEndpoint("mvc::Inherited:Index")?.Resource);
+        Assert.Equal("products", catalog.FindEndpoint("mvc::Products:Get")?.Resource);
+        Assert.Equal("folder", catalog.FindEndpoint("page::/Folder/Page")?.Resource);
+        Assert.Equal("secure", catalog.FindEndpoint("page::/Secure/Index")?.Resource);
+        Assert.Equal("items", catalog.FindEndpoint("endpoint:GET /api/items")?.Resource);
+        Assert.Equal("orders", catalog.FindEndpoint("endpoint:GET /api/v1/orders")?.Resource);
+        Assert.Equal("orders", catalog.FindEndpoint("endpoint:GET /api/legacy-orders")?.Resource);
+        Assert.Equal("invoices", catalog.FindEndpoint("endpoint:GET /api/v2/invoices")?.Resource);
+
+        // The resource of the endpoint, not the resource of the permission it requires.
+        EndpointAuthorizationInfo audit = Assert.IsType<EndpointAuthorizationInfo>(catalog.FindEndpoint("endpoint:GET /api/orders/audit"));
+        Assert.Equal("reports.export", audit.Permission?.Permission);
+        Assert.Equal("orders", audit.Resource);
+    }
+
+    [Fact]
+    public async Task Every_entry_of_a_page_describes_the_page_resource()
+    {
+        await using TestApp app = await TestApp.StartAsync();
+
+        IEnumerable<EndpointAuthorizationInfo> secure = app.GetCatalog().Endpoints.Where(e => e.TargetKey == "page::/Secure/Index");
+
+        Assert.True(secure.Count() > 1);
+        Assert.All(secure, e => Assert.Equal("secure", e.Resource));
+    }
+
+    [Fact]
+    public async Task Endpoints_of_a_resource_are_listed_together_ignoring_case()
+    {
+        await using TestApp app = await TestApp.StartAsync();
+
+        PermissionCatalog catalog = app.GetCatalog();
+
+        EndpointAuthorizationInfo[] orders = [.. catalog.GetResourceEndpoints("ORDERS")];
+        Assert.Contains(orders, e => e.TargetKey == "mvc::Orders:Index");
+        Assert.Contains(orders, e => e.Route == "/api/v1/orders");
+        Assert.Contains(orders, e => e.Route == "/api/legacy-orders");
+        Assert.All(orders, e => Assert.Equal("orders", e.Resource, StringComparer.OrdinalIgnoreCase));
+        Assert.Empty(catalog.GetResourceEndpoints("unknown"));
+    }
+
+    [Fact]
+    public void Entries_built_without_a_resource_have_none()
+    {
+        EndpointAuthorizationInfo entry = new(
+            new Endpoint(null, EndpointMetadataCollection.Empty, "test"), "Test", "Test", "/test", [], PermissionSource.Endpoint, null,
+            EndpointProtection.None, "endpoint:GET /test", null);
+
+        Assert.Null(entry.Resource);
+        Assert.Empty(new PermissionCatalog([], [entry]).GetResourceEndpoints("test"));
+    }
 }

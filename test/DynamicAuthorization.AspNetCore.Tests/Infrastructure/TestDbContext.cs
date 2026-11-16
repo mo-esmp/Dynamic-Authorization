@@ -9,7 +9,7 @@ internal sealed class TestDbContext(DbContextOptions<TestDbContext> options) : I
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-        builder.EnableDynamicAuthorization();
+        builder.EnableDynamicAuthorization(o => o.ResourcePolicies = true);
 
         // Lets SQLite answer prefix searches for users from the Identity indexes (see "Searching users" in the README).
         builder.Entity<IdentityUser>(user =>

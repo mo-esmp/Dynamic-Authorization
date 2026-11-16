@@ -33,6 +33,9 @@ public static class DynamicAuthorizationEntityFrameworkBuilderExtensions
             typeof(IPermissionStore),
             typeof(EntityFrameworkPermissionStore<,>).MakeGenericType(types.Context, types.Key));
         services.TryAddScoped(
+            typeof(IResourcePolicyStore),
+            typeof(EntityFrameworkResourcePolicyStore<>).MakeGenericType(types.Context));
+        services.TryAddScoped(
             typeof(IUserRoleProvider),
             typeof(EntityFrameworkUserRoleProvider<,,,>).MakeGenericType(types.Context, types.Role, types.Key, types.UserRole));
         services.TryAddScoped(

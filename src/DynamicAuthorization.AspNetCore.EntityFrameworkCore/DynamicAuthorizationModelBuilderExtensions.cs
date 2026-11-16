@@ -1,4 +1,5 @@
-﻿using DynamicAuthorization.AspNetCore.EntityFrameworkCore;
+﻿using DynamicAuthorization.AspNetCore;
+using DynamicAuthorization.AspNetCore.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -41,6 +42,17 @@ public static class DynamicAuthorizationModelBuilderExtensions
             entity.HasIndex(permission);
             entity.HasOne(roleEntity.ClrType).WithMany().HasForeignKey(roleId).IsRequired().OnDelete(DeleteBehavior.Cascade);
         });
+
+        if (options.ResourcePolicies)
+        {
+            modelBuilder.Entity<ResourcePolicy>(entity =>
+            {
+                entity.ToTable(options.ResourcePolicyTableName, options.Schema);
+                entity.HasKey(p => new { p.Resource, p.PolicyName });
+                entity.Property(p => p.Resource).HasMaxLength(DynamicAuthorizationModelOptions.MaxPermissionLength).IsRequired();
+                entity.Property(p => p.PolicyName).HasMaxLength(AssignablePolicyDefinition.MaxNameLength).IsRequired();
+            });
+        }
 
         return modelBuilder;
     }
