@@ -3,6 +3,7 @@ using DynamicAuthorization.AspNetCore.Management;
 using DynamicAuthorization.AspNetCore.TagHelpers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -58,6 +59,7 @@ public static class DynamicAuthorizationServiceCollectionExtensions
         services.TryAddSingleton<EndpointAuthorizationResolver>();
         services.TryAddSingleton<EndpointPolicyCache>();
         services.TryAddSingleton<IPermissionCatalogProvider, PermissionCatalogProvider>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ControllerNameValidator>());
         services.TryAddScoped<IPermissionChecker, PermissionChecker>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IAuthorizationHandler, DynamicPermissionHandler>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<AuthorizationOptions>, ConfigureAuthorizationOptions>());
