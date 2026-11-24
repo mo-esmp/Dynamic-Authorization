@@ -456,8 +456,7 @@ internal sealed partial class EndpointAuthorizationResolver
             return false;
         }
 
-        string name = resource[(resource.LastIndexOf('.') + 1)..];
-        return string.Equals(PermissionKeys.ToSegment(segment), name, StringComparison.OrdinalIgnoreCase);
+        return IsSameName(segment, resource[(resource.LastIndexOf('.') + 1)..]);
     }
 
     private static EndpointProtection GetProtection(
@@ -573,15 +572,45 @@ internal sealed partial class EndpointAuthorizationResolver
     private static string WithArea(string? area, string name) => area is null ? name : $"{area} / {name}";
 
     /// <summary>
-    ///   Removes the first literal segment that names the area, compared as permission key segments, so that
-    ///   <c>BackOffice</c> matches <c>back-office</c>. A route without one keeps every segment.
+    ///   Removes the first literal segment that names the area. A route without one keeps every segment.
     /// </summary>
     private static string[] WithoutAreaSegment(string[] literals, string area)
     {
-        string key = PermissionKeys.ToSegment(area);
-        int index = Array.FindIndex(literals, l => string.Equals(PermissionKeys.ToSegment(l), key, StringComparison.Ordinal));
+        int index = Array.FindIndex(literals, l => IsSameName(l, area));
 
         return index < 0 ? literals : [.. literals[..index], .. literals[(index + 1)..]];
+    }
+
+    /// <summary>
+    ///   Determines whether a route segment and a name written in code are the same name: their letters and digits
+    ///   are equal, ignoring case, so <c>BackOffice</c> matches <c>backoffice</c>, <c>back-office</c> and <c>back_office</c>.
+    /// </summary>
+    private static bool IsSameName(string segment, string name)
+    {
+        int i = 0;
+        int j = 0;
+        while (true)
+        {
+            while (i < segment.Length && !char.IsLetterOrDigit(segment[i]))
+            {
+                i++;
+            }
+
+            while (j < name.Length && !char.IsLetterOrDigit(name[j]))
+            {
+                j++;
+            }
+
+            if (i == segment.Length || j == name.Length)
+            {
+                return i == segment.Length && j == name.Length;
+            }
+
+            if (char.ToUpperInvariant(segment[i++]) != char.ToUpperInvariant(name[j++]))
+            {
+                return false;
+            }
+        }
     }
 
     private static bool IsRequestMethod(string method) =>

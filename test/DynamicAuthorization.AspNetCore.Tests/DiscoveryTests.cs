@@ -350,6 +350,7 @@ public sealed class DiscoveryTests
     [InlineData("GET", "/api/v{version}/admin/invoices", "admin.invoices", "admin.invoices.read")]
     [InlineData("GET", "/api/back-office/stock", "back-office.stock", "back-office.stock.read")]
     [InlineData("GET", "/api/backoffice/orders", "admin.backoffice", "admin.backoffice.read")]
+    [InlineData("GET", "/api/backoffice/users", "back-office.users", "back-office.users.read")]
     public async Task Minimal_api_areas_prefix_the_resource_and_keep_the_operation(string method, string route, string resource, string permission)
     {
         await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = MapAdminApis);
@@ -401,6 +402,7 @@ public sealed class DiscoveryTests
     [InlineData("/api/legacy/orders/{id:int}/ship", "admin.orders.ship")]
     [InlineData("/api/legacy/orders/archive", "admin.orders.archive")]
     [InlineData("/api/items/{id:int}/ship", "items.ship")]
+    [InlineData("/api/catalog/order-items", "OrderItems.create")]
     public async Task Posts_to_an_explicit_resource_collection_create(string route, string permission)
     {
         await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = e =>
@@ -409,6 +411,7 @@ public sealed class DiscoveryTests
             legacy.MapPost("", () => "created");
             legacy.MapPost("/{id:int}/ship", (int id) => "shipped");
             legacy.MapPost("/archive", () => "archived");
+            e.MapPost("/api/catalog/order-items", () => "created").RequireAuthorization().WithPermissionResource("OrderItems");
         });
 
         EndpointAuthorizationInfo entry = Assert.IsType<EndpointAuthorizationInfo>(app.GetCatalog().FindEndpoint(PermissionKeys.ForRoute(["POST"], route)));
@@ -433,5 +436,6 @@ public sealed class DiscoveryTests
         e.MapGet("/api/v{version}/admin/invoices", (string version) => version).RequireAuthorization().WithPermissionArea("admin");
         e.MapGet("/api/back-office/stock", () => "stock").RequireAuthorization().WithPermissionArea("BackOffice");
         e.MapGet("/api/backoffice/orders", () => "back office").RequireAuthorization().WithPermissionArea("admin");
+        e.MapGet("/api/backoffice/users", () => "back office users").RequireAuthorization().WithPermissionArea("BackOffice");
     }
 }

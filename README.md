@@ -207,10 +207,10 @@ admin.MapPost("/orders", ...);
 
 Without the area, every admin endpoint would belong to one `admin` resource, and `admin.read` would grant reading
 everything under `/api/admin`. The area's route segment is skipped wherever the version segments are, so all versions
-share a permission; the area matches its segment written in any case (`BackOffice` matches `/api/back-office`). An area
-works like `[Area("Admin")]` on a controller: `[Area("Admin")] OrdersController` and `/api/admin/orders` share the
-`admin.orders` permissions and the policies assigned to that resource, and `IgnoredAreas` applies to both.
-`WithPermissionResource` replaces the whole resource, area included.
+share a permission; the area matches its segment whatever the case and separators (`BackOffice` matches
+`/api/backoffice` and `/api/back-office`). An area works like `[Area("Admin")]` on a controller: `[Area("Admin")]
+OrdersController` and `/api/admin/orders` share the `admin.orders` permissions and the policies assigned to that
+resource, and `IgnoredAreas` applies to both. `WithPermissionResource` replaces the whole resource, area included.
 
 You can also keep `ApplyToDefaultPolicy` and exclude the client APIs with `.IgnoreDynamicAuthorization()` instead. Turning
 the default off is safer: a new endpoint is never permission-checked by accident, only by asking for it.
