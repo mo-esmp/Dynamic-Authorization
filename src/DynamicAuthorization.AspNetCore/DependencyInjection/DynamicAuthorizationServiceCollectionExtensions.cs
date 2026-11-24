@@ -59,7 +59,8 @@ public static class DynamicAuthorizationServiceCollectionExtensions
         services.TryAddSingleton<EndpointAuthorizationResolver>();
         services.TryAddSingleton<EndpointPolicyCache>();
         services.TryAddSingleton<IPermissionCatalogProvider, PermissionCatalogProvider>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ControllerNameValidator>());
+        services.TryAddSingleton<ControllerNameValidator>();
+        services.AddHostedService(sp => sp.GetRequiredService<ControllerNameValidator>());
         services.TryAddScoped<IPermissionChecker, PermissionChecker>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IAuthorizationHandler, DynamicPermissionHandler>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<AuthorizationOptions>, ConfigureAuthorizationOptions>());

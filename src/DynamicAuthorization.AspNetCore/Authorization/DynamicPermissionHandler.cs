@@ -11,6 +11,7 @@ namespace DynamicAuthorization.AspNetCore;
 internal sealed partial class DynamicPermissionHandler(
     IPermissionChecker permissionChecker,
     EndpointAuthorizationResolver resolver,
+    ControllerNameValidator controllerNames,
     ResourcePolicyEvaluator resourcePolicies,
     ILogger<DynamicPermissionHandler> logger) : AuthorizationHandler<DynamicPermissionRequirement>
 {
@@ -128,6 +129,15 @@ internal sealed partial class DynamicPermissionHandler(
 
         if (info is not null)
         {
+            // Controllers that share a resource or permission only because they have the same name are never
+            // authorized, so a grant meant for one cannot open the other.
+            if (info is { Protection: EndpointProtection.DynamicPermission, Source: PermissionSource.Controller }
+                && controllerNames.GetConflict(info.Endpoint) is { } conflict)
+            {
+                LogControllerNameConflict(logger, info.Endpoint.DisplayName, conflict);
+                return (true, null, null, null);
+            }
+
             return info.Protection == EndpointProtection.Excluded
                 ? (false, null, null, null)
                 : (true, info.Permission?.Permission ?? info.TargetKey, request, request is null ? null : info);
@@ -159,4 +169,7 @@ internal sealed partial class DynamicPermissionHandler(
 
     [LoggerMessage(3, LogLevel.Warning, "No permission could be resolved for the authorization resource '{ResourceType}'. Access is denied.")]
     private static partial void LogUnresolvedPermission(ILogger logger, string resourceType);
+
+    [LoggerMessage(4, LogLevel.Error, "Access to '{Endpoint}' is denied because its controller shares permissions with another controller. {Conflict}")]
+    private static partial void LogControllerNameConflict(ILogger logger, string? endpoint, string conflict);
 }
