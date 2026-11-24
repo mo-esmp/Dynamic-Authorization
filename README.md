@@ -149,6 +149,18 @@ Endpoints with the same resource share its permissions: `orders.read` grants the
 pages in `/Orders` and `GET /api/orders` alike. Areas are part of the resource (`admin.reports`). A Minimal API's resource
 is the first route segment after `api` and a version segment, so `/api/v2/orders` is `orders` too.
 
+**Controllers are identified by their area and name, not their namespace**, so renaming or moving a namespace keeps the
+granted permissions. Two controllers with the same name in the same area, such as `Admin.WidgetsController` and
+`Client.WidgetsController` without `[Area]`, would therefore be the same resource: granting a permission, or assigning a
+policy, for one would apply to the other, including the read access that any operation implies. The application fails to
+start instead, naming the controllers, and requests to them are denied should such a controller be added at runtime. Put
+them in different areas with `[Area]` (areas that only differ in case or hyphens, such as `BackOffice` and `Back-Office`,
+are the same resource), rename one of them, or give each a resource of its own with `[PermissionResource]`. To share on
+purpose, for example between versions of an API, every one of the controllers must opt in: declare the same resource on
+each, `[PermissionResource("widgets")]`, and an explicit key, `[Permission("widgets.read")]`, on actions that require a
+permission of another resource. With the endpoint convention, permissions don't depend on the resource, so sharing ones
+also need `[Permission("key")]` on the actions of each controller.
+
 **Any operation implies read.** A role granted `orders.update` can also open the pages that require `orders.read`, such
 as the list that links to the edit form. Set `OperationsImplyRead = false` to require read explicitly.
 

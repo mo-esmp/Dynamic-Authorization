@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -51,8 +52,11 @@ internal sealed class PermissionCatalogProvider : IPermissionCatalogProvider, ID
                 .Where(e => !IsInfrastructureEndpoint(e))
                 .SelectMany(_resolver.DescribeAll)
                 // A page or action can be reachable through several routes (e.g. /Orders and /Orders/Index); list it once.
+                // Controllers with the same name in different namespaces have the same target keys but are different
+                // actions; list each.
                 .GroupBy(e => (
                     Key: e.TargetKey.ToUpperInvariant(),
+                    Controller: e.Endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?.ControllerTypeInfo,
                     Methods: string.Join(',', e.HttpMethods),
                     Handler: e.Handler?.ToUpperInvariant(),
                     e.Protection))

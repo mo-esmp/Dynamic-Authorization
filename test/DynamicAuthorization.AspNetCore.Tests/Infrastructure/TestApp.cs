@@ -1,8 +1,11 @@
-﻿using System.Security.Claims;
+﻿using System.Reflection;
+using System.Security.Claims;
 using DynamicAuthorization.AspNetCore.Dashboard;
 using DynamicAuthorization.AspNetCore.Management;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.ApplicationParts;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -76,7 +79,9 @@ internal sealed class TestApp : IAsyncDisposable
             .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, null);
         builder.Services.AddAuthorization(o =>
             o.AddPolicy("CanSchedule", p => p.RequireAuthenticatedUser().AddRequirements(new DynamicPermissionRequirement("reports.schedule"))));
-        builder.Services.AddControllersWithViews();
+        builder.Services
+            .AddControllersWithViews()
+            .ConfigureApplicationPartManager(m => m.FeatureProviders.Add(new AdditionalControllersFeatureProvider(options.Controllers)));
         IMvcBuilder pages = builder.Services.AddRazorPages(o => o.Conventions.AuthorizeFolder("/Folder"));
         if (options.RazorRuntimeCompilation)
         {
@@ -259,6 +264,12 @@ internal sealed class TestAppOptions
 {
     public Action<DynamicAuthorizationOptions>? Authorization { get; set; }
 
+    /// <summary>
+    ///   Adds controllers that are not public, and therefore not discovered, for example ones that would make other
+    ///   tests fail.
+    /// </summary>
+    public Type[] Controllers { get; set; } = [];
+
     public bool Dashboard { get; set; }
 
     public Action<DashboardOptions>? DashboardOptions { get; set; }
@@ -291,3 +302,14 @@ internal sealed class TestAppOptions
 }
 
 internal sealed record TestUser(string Id, string UserName);
+
+internal sealed class AdditionalControllersFeatureProvider(Type[] controllers) : IApplicationFeatureProvider<ControllerFeature>
+{
+    public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
+    {
+        foreach (Type controller in controllers)
+        {
+            feature.Controllers.Add(controller.GetTypeInfo());
+        }
+    }
+}
