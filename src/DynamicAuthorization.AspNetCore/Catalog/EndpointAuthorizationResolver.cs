@@ -572,14 +572,11 @@ internal sealed partial class EndpointAuthorizationResolver
     private static string WithArea(string? area, string name) => area is null ? name : $"{area} / {name}";
 
     /// <summary>
-    ///   Removes the first literal segment that names the area. A route without one keeps every segment.
+    ///   Removes the segment that names the area when it is the route's prefix: the first literal after "api" and the
+    ///   version. Later segments are kept, so an action that happens to have the area's name keeps its operation.
     /// </summary>
-    private static string[] WithoutAreaSegment(string[] literals, string area)
-    {
-        int index = Array.FindIndex(literals, l => IsSameName(l, area));
-
-        return index < 0 ? literals : [.. literals[..index], .. literals[(index + 1)..]];
-    }
+    private static string[] WithoutAreaSegment(string[] literals, string area) =>
+        literals.Length > 0 && IsSameName(literals[0], area) ? literals[1..] : literals;
 
     /// <summary>
     ///   Determines whether a route segment and a name written in code are the same name: their letters and digits

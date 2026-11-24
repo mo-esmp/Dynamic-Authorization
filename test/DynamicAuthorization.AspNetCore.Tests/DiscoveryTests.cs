@@ -351,6 +351,8 @@ public sealed class DiscoveryTests
     [InlineData("GET", "/api/back-office/stock", "back-office.stock", "back-office.stock.read")]
     [InlineData("GET", "/api/backoffice/orders", "admin.backoffice", "admin.backoffice.read")]
     [InlineData("GET", "/api/backoffice/users", "back-office.users", "back-office.users.read")]
+    [InlineData("POST", "/api/sales", "admin.sales", "admin.sales.create")]
+    [InlineData("POST", "/api/sales/{id:int}/admin", "admin.sales", "admin.sales.admin")]
     public async Task Minimal_api_areas_prefix_the_resource_and_keep_the_operation(string method, string route, string resource, string permission)
     {
         await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = MapAdminApis);
@@ -391,6 +393,8 @@ public sealed class DiscoveryTests
     {
         Assert.Throws<ArgumentException>(() => new PermissionAreaMetadata(" "));
         Assert.ThrowsAny<ArgumentException>(() => new PermissionAreaMetadata(null!));
+        Assert.Throws<ArgumentException>(() => new PermissionAreaMetadata("---"));
+        Assert.Throws<ArgumentException>(() => new PermissionAreaMetadata("___"));
     }
 
     /// <summary>
@@ -437,5 +441,10 @@ public sealed class DiscoveryTests
         e.MapGet("/api/back-office/stock", () => "stock").RequireAuthorization().WithPermissionArea("BackOffice");
         e.MapGet("/api/backoffice/orders", () => "back office").RequireAuthorization().WithPermissionArea("admin");
         e.MapGet("/api/backoffice/users", () => "back office users").RequireAuthorization().WithPermissionArea("BackOffice");
+
+        // The area is not in the prefix: an action named like the area keeps its segment.
+        RouteGroupBuilder sales = e.MapGroup("/api/sales").RequireAuthorization().WithPermissionArea("admin");
+        sales.MapPost("", () => "created");
+        sales.MapPost("/{id:int}/admin", (int id) => "admin");
     }
 }

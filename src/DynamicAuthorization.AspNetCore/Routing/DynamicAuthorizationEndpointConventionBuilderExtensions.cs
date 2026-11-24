@@ -77,10 +77,10 @@ public static class DynamicAuthorizationEndpointConventionBuilderExtensions
     }
 
     /// <summary>
-    ///   Places endpoints in an area, the way <c>[Area]</c> does for a controller. The area's route segment is skipped,
-    ///   and the area prefixes the resource derived from the rest of the route, wherever API version segments are:
-    ///   <c>GET /api/admin/orders</c> and <c>GET /api/v2/admin/orders</c> in the <c>admin</c> area require
-    ///   <c>admin.orders.read</c>. Area endpoints share their permissions with the controllers of the same area and
+    ///   Places endpoints in an area, the way <c>[Area]</c> does for a controller. The area's route segment is skipped
+    ///   when it starts the route, after <c>api</c> and any version segment, and the area prefixes the resource derived
+    ///   from the rest of the route: <c>GET /api/admin/orders</c> and <c>GET /api/v2/admin/orders</c> in the
+    ///   <c>admin</c> area require <c>admin.orders.read</c>. Area endpoints share their permissions with the controllers of the same area and
     ///   resource, and <see cref="DynamicAuthorizationOptions.IgnoredAreas"/> applies to them.
     /// </summary>
     /// <typeparam name="TBuilder">The endpoint convention builder type.</typeparam>

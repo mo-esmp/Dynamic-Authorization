@@ -59,7 +59,8 @@ yields `admin.orders.*`; Minimal APIs have no equivalent.
   `string Area`, implemented by a sealed `PermissionAreaMetadata` or attribute). It doesn't reuse MVC's `AreaAttribute`, so
   link generation and MVC route values aren't affected.
 - **Resource.** In `DescribeRoute`, when the endpoint has an area: drop `api` and version segments as today, then drop the
-  first remaining literal equal to the area (case-insensitive, compared after `PermissionKeys.ToSegment`). The resource is
+  first remaining literal if it names the area (its letters and digits equal, ignoring case). Only that prefix position
+  counts: in a group at `/api/orders`, `POST /api/orders/{id}/admin` keeps its `admin` action. The resource is
   `{area}.{first remaining literal}`, built with the same `JoinResource` as controllers. If no literal remains
   (`GET /api/admin`), the resource is the area itself. If the route has no segment named after the area
   (`/api/backoffice/orders` with area `admin`), nothing is dropped: `admin.backoffice`.
