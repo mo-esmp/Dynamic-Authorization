@@ -17,34 +17,35 @@ touching the source code?
 
 ![dynamic-auth.jpg (2288×1008)](https://raw.githubusercontent.com/mo-esmp/Dynamic-Authorization/refs/heads/main/assets/dynamic-auth.jpg)
 
-**Dynamic Authorization** turns every `[Authorize]` endpoint into a permission that you grant to roles at runtime. It works with
-**MVC controllers, Razor Pages and Minimal APIs**, stores permissions in your **ASP.NET Core Identity database with Entity
-Framework Core** (any provider), and ships a **dashboard** to manage roles, permissions and user roles.
+**Dynamic Authorization** turns every `[Authorize]` endpoint into a permission that you grant to roles at runtime:
+
+- Works with **MVC controllers, Razor Pages and Minimal APIs**, without changing your `[Authorize]` attributes.
+- Stores permissions in your **ASP.NET Core Identity database** with Entity Framework Core (any provider).
+- Ships a **dashboard** to manage roles, permissions and user roles, and to assign authorization policies to resources.
+- Runs on **multiple instances** with a cache shared through `HybridCache`.
 
 ## Contents
 
 - [Packages](#packages)
 - [Getting started](#getting-started)
-  - [1. Install the packages](#1-install-the-packages)
-  - [2. Add the permissions table to your Identity context](#2-add-the-permissions-table-to-your-identity-context)
-  - [3. Register dynamic authorization](#3-register-dynamic-authorization)
-- [Permissions: resources and operations](#permissions-resources-and-operations)
+- [How it works](#how-it-works)
+  - [Permissions: resources and operations](#permissions-resources-and-operations)
+  - [How the operation is chosen](#how-the-operation-is-chosen)
+  - [What is permission-checked](#what-is-permission-checked)
+  - [Super admins](#super-admins)
+- [Customizing permissions](#customizing-permissions)
   - [Overriding the convention](#overriding-the-convention)
   - [Permission-checking only some APIs](#permission-checking-only-some-apis)
   - [One permission per endpoint](#one-permission-per-endpoint)
-  - [What is permission-checked](#what-is-permission-checked)
+  - [Controllers with the same name](#controllers-with-the-same-name)
   - [Display names](#display-names)
   - [Permissions checked in code](#permissions-checked-in-code)
 - [Assigning policies to resources](#assigning-policies-to-resources)
 - [Showing content only to users who may access it](#showing-content-only-to-users-who-may-access-it)
-- [Super admins](#super-admins)
 - [Dashboard](#dashboard)
-  - [Searching users](#searching-users)
 - [Caching and multiple instances](#caching-and-multiple-instances)
-  - [Sharing the cache between instances](#sharing-the-cache-between-instances)
 - [Options](#options)
-- [Migrating from 1.x](#migrating-from-1x)
-- [Sample](#sample)
+- [Upgrading](#upgrading)
 - [Building](#building)
 - [License](#license)
 
@@ -57,8 +58,8 @@ Framework Core** (any provider), and ships a **dashboard** to manage roles, perm
 | `DynamicAuthorization.AspNetCore.Dashboard` | A Razor Pages dashboard to manage roles, user roles and the policies assigned to resources, inspect endpoints and check access. |
 | `DynamicAuthorization.AspNetCore.HybridCache` | Caches user roles and role permissions in `HybridCache`, shared between instances through a distributed cache. |
 
-Version 2 targets **.NET 10** and **.NET 11**. Version 1.x (`DynamicAuthorization.Mvc.*`) remains available for older frameworks; see
-[Migrating from 1.x](#migrating-from-1x).
+Version 2 targets **.NET 10** and **.NET 11**. Version 1.x (`DynamicAuthorization.Mvc.*`) remains available for older
+frameworks; see [Migrating from 1.x](#migrating-from-1x).
 
 ## Getting started
 
@@ -114,10 +115,26 @@ app.MapDynamicAuthorizationDashboard();                   // https://your-app/au
 That's it: every endpoint protected by `[Authorize]` now requires a permission, such as `orders.read` or `orders.update`.
 Sign in as the super admin, open `/authz`, create roles, choose their permissions and assign them to users.
 
-## Permissions: resources and operations
+### Run the sample
 
-Permissions are named `{resource}.{operation}`. The **resource** comes from the controller, the Razor Pages folder or the
-route. The **operation** is `read`, `create`, `update` or `delete`, or a custom operation such as `archive`:
+[`samples/SampleWebApp`](https://github.com/mo-esmp/Dynamic-Authorization/tree/main/samples/SampleWebApp) protects
+Razor Pages, an MVC area and Minimal APIs, uses SQLite with migrations, registers two policies admins can assign to
+resources (`BusinessHours` and `CompanyAccounts`), and seeds three demo accounts (the password is in `appsettings.json`):
+
+```shell
+dotnet run --project samples/SampleWebApp --framework net11.0 --launch-profile http
+```
+
+The sample targets .NET 10 and .NET 11, so `dotnet run` needs `--framework`; use `net10.0` to run it on .NET 10.
+
+## How it works
+
+### Permissions: resources and operations
+
+Permissions are named `{resource}.{operation}`:
+
+- The **resource** comes from the controller (and its area), the Razor Pages folder, or the Minimal API route.
+- The **operation** is `read`, `create`, `update` or `delete`, or a custom operation such as `archive`.
 
 | Endpoint | Permission |
 | --- | --- |
@@ -136,7 +153,25 @@ route. The **operation** is `read`, `create`, `update` or `delete`, or a custom 
 | `DELETE /api/orders/{id}` | `orders.delete` |
 | `POST /api/orders/{id}/ship` | `orders.ship` |
 
-The operation is inferred in this order; the first rule that matches wins:
+A few rules follow from this:
+
+- **Endpoints with the same resource share its permissions.** `orders.read` grants the read actions of
+  `OrdersController`, the pages in `/Orders` and `GET /api/orders` alike.
+- **Areas are part of the resource:** `[Area("Admin")] ReportsController` is `admin.reports`. Minimal APIs can have an
+  area too; see [Permission-checking only some APIs](#permission-checking-only-some-apis).
+- **A Minimal API's resource** is the first route segment after `api` and a version segment, so `/api/v2/orders` is
+  `orders` too.
+- **Controllers are identified by their area and name, not their namespace**, so renaming or moving a namespace keeps the
+  granted permissions. Two controllers with the same name in the same area are therefore rejected; see
+  [Controllers with the same name](#controllers-with-the-same-name).
+- **Any operation implies read.** A role granted `orders.update` can also open the pages that require `orders.read`, such
+  as the list that links to the edit form. Set `OperationsImplyRead = false` to require read explicitly.
+- **Razor Page handlers are authorized separately.** `OnPostArchive` on the orders page requires `orders.archive` although
+  `OnGet` only requires `orders.read`.
+
+### How the operation is chosen
+
+The first rule that matches wins:
 
 1. An override: `[Permission(...)]`, `.RequirePermission(...)` or `.RequirePermissionOperation(...)`.
 2. The name of the action, page, page handler or endpoint (`WithName`): `Index`, `Details`, `List` and `Get…` mean read;
@@ -146,29 +181,50 @@ The operation is inferred in this order; the first rule that matches wins:
 4. Otherwise, the operation is named after the action, page handler or last route segment: `POST Orders/Approve` requires
    `orders.approve`. A POST is never guessed to be a create.
 
-Endpoints with the same resource share its permissions: `orders.read` grants the read actions of `OrdersController`, the
-pages in `/Orders` and `GET /api/orders` alike. Areas are part of the resource (`admin.reports`). A Minimal API's resource
-is the first route segment after `api` and a version segment, so `/api/v2/orders` is `orders` too. A Minimal API area
-(`WithPermissionArea("admin")`, see [Permission-checking only some APIs](#permission-checking-only-some-apis)) skips its
-own segment and prefixes the resource: `/api/admin/orders` is `admin.orders`.
+### What is permission-checked
 
-**Controllers are identified by their area and name, not their namespace**, so renaming or moving a namespace keeps the
-granted permissions. Two controllers with the same name in the same area, such as `Admin.WidgetsController` and
-`Client.WidgetsController` without `[Area]`, would therefore be the same resource: granting a permission, or assigning a
-policy, for one would apply to the other, including the read access that any operation implies. The application fails to
-start instead, naming the controllers, and requests to them are denied should such a controller be added at runtime. Put
-them in different areas with `[Area]` (areas that only differ in case or hyphens, such as `BackOffice` and `Back-Office`,
-are the same resource), rename one of them, or give each a resource of its own with `[PermissionResource]`. To share on
-purpose, for example between versions of an API, every one of the controllers must opt in: declare the same resource on
-each, `[PermissionResource("widgets")]`, and an explicit key, `[Permission("widgets.read")]`, on actions that require a
-permission of another resource. With the endpoint convention, permissions don't depend on the resource, so sharing ones
-also need `[Permission("key")]` on the actions of each controller.
+With the default options, the permission check is added to ASP.NET Core's **default authorization policy**. Every endpoint
+protected by a plain `[Authorize]`, `RequireAuthorization()` or `AuthorizeFolder()` requires a permission, with no
+attribute changes.
 
-**Any operation implies read.** A role granted `orders.update` can also open the pages that require `orders.read`, such
-as the list that links to the edit form. Set `OperationsImplyRead = false` to require read explicitly.
+What is **not** permission-checked:
 
-**Razor Page handlers are authorized separately.** `OnPostArchive` on the orders page requires `orders.archive` although
-`OnGet` only requires `orders.read`.
+- `[AllowAnonymous]` endpoints.
+- `[Authorize(Roles = "...")]` or `[Authorize(Policy = "...")]` without a plain `[Authorize]`: you already chose static
+  authorization for those.
+- Endpoints marked `[IgnoreDynamicAuthorization]` or `.IgnoreDynamicAuthorization()`, and areas listed in `IgnoredAreas`
+  (`Identity` by default, so the Identity UI account pages stay available), including Minimal API areas set with
+  `WithPermissionArea`. They still require a signed-in user.
+
+Good to know:
+
+- `RequireDynamicAuthorization()` requires the permission even when `ApplyToDefaultPolicy` is disabled.
+- **Your own policies** are permission-checked when they include the requirement: `options.AddPolicy("Managers", p =>
+  p.RequireRole("Manager").AddRequirements(new DynamicPermissionRequirement()))` requires the role and the endpoint's
+  permission. Inline policies passed to `RequireAuthorization(policy)` replace the default policy, as in ASP.NET Core, so
+  they are permission-checked only when they include the requirement.
+- **The fallback policy** can require an explicit permission (`new DynamicPermissionRequirement("app.access")`) but not
+  the permission of the endpoint: endpoints without authorization metadata have none, and startup fails with an
+  explanation.
+- **A SignalR hub is one endpoint**, although `MapHub` maps two: `MapHub<ChatHub>("/chat").RequireAuthorization()`
+  requires `chat.access` for the hub and for `/chat/negotiate`, which clients call first.
+- **Razor runtime compilation is supported.** Its pages are compiled when they are first described, for example when the
+  dashboard lists the endpoints, rather than on their first request, because only a compiled page has its authorization,
+  page model attributes and handlers.
+
+### Super admins
+
+Super admins have every permission, which lets you bootstrap the first administrator before any role exists:
+
+```csharp
+options.SuperAdminUsers.Add("admin@example.com"); // by username
+options.SuperAdminRoles.Add("Administrators");    // members of these roles
+```
+
+Super admin roles can't be renamed or deleted from the dashboard, and the last member of a super admin role can't be removed
+when no super admin user is configured.
+
+## Customizing permissions
 
 ### Overriding the convention
 
@@ -194,13 +250,6 @@ app.MapGroup("/api/admin").WithPermissionArea("admin");              // like [Ar
 With `WithPermissionResource`, a POST to the route segment named after the resource is a create, however many segments
 come before it: `POST /api/legacy/orders` in a group with `WithPermissionResource("admin.orders")` requires
 `admin.orders.create`.
-
-**When upgrading** from an earlier 2.x version, review two sets of grants before rollout. Such a POST used to require
-`{resource}.{last segment}` (`admin.orders.orders`) when the route had more than one segment besides `api` and the
-version: roles that had it lose the POST until they are granted `{resource}.create`, and the dashboard's Overview lists
-the old grant as no longer matching anything. Roles that already have `{resource}.create` gain the POST, and granting
-`create` to holders of the old permission also opens every other endpoint that requires it. To keep the old boundary,
-require the old permission explicitly: `.RequirePermission("admin.orders.orders")`.
 
 ### Permission-checking only some APIs
 
@@ -233,26 +282,31 @@ the same URL prefix.
 | `DELETE /api/admin/users/{id}` | `admin.users.delete` |
 | `GET /api/v2/admin/orders`, `GET /api/admin/v2/orders` | `admin.orders.read` |
 
-Without the area, every admin endpoint would belong to one `admin` resource, and `admin.read` would grant reading
-everything under `/api/admin`. The area's segment is skipped when it starts the route, after `api` and any version
-segment, so all versions share a permission; a later segment with the area's name is kept, so an action like `POST
-/api/orders/{id}/admin` in a group at `/api/orders` still requires `admin.orders.admin`. The area matches its segment
-whatever the case and separators (`BackOffice` matches `/api/backoffice` and `/api/back-office`). An area works like
-`[Area("Admin")]` on a controller: `[Area("Admin")] OrdersController` and `/api/admin/orders` share the `admin.orders`
-permissions and the policies assigned to that resource, and `IgnoredAreas` applies to both. `WithPermissionResource`
-replaces the whole resource, area included.
+How Minimal API areas work:
 
-**Adding an area to existing endpoints** moves them to new resources: `/api/admin/orders` moves from `admin` to
-`admin.orders`. With the CRUD convention their permissions change too, and the dashboard lists the old grants as no
-longer matching anything; with `PermissionConvention.Endpoint` the grants still match. Under either convention, the
-policies assigned to the old resource stop applying to them at once, because a resource without assignments has no extra
-restrictions. Assign the policies to each new resource before the remapped endpoints serve requests. The dashboard and
-`IResourcePolicyManagementService` only accept resources the running application has, so either store the assignments
-through `IResourcePolicyStore` ahead of the deployment and invalidate the cache, or keep the remapped endpoints
-unexposed until they are in place.
+- **Without the area**, every admin endpoint would belong to one `admin` resource, and `admin.read` would grant reading
+  everything under `/api/admin`.
+- **The area's segment is skipped** when it starts the route, after `api` and any version segment, so all versions share a
+  permission. A later segment with the area's name is kept, so an action like `POST /api/orders/{id}/admin` in a group at
+  `/api/orders` still requires `admin.orders.admin`.
+- **Case and separators don't matter:** `BackOffice` matches `/api/backoffice` and `/api/back-office`.
+- **An area works like `[Area("Admin")]` on a controller:** `[Area("Admin")] OrdersController` and `/api/admin/orders`
+  share the `admin.orders` permissions and the policies assigned to that resource, and `IgnoredAreas` applies to both.
+- **`WithPermissionResource` replaces the whole resource**, area included.
 
 You can also keep `ApplyToDefaultPolicy` and exclude the client APIs with `.IgnoreDynamicAuthorization()` instead. Turning
 the default off is safer: a new endpoint is never permission-checked by accident, only by asking for it.
+
+**Adding an area to existing endpoints** moves them to new resources: `/api/admin/orders` moves from `admin` to
+`admin.orders`.
+
+- With the CRUD convention their permissions change too, and the dashboard lists the old grants as no longer matching
+  anything. With `PermissionConvention.Endpoint` the grants still match.
+- Under either convention, the policies assigned to the old resource stop applying to them at once, because a resource
+  without assignments has no extra restrictions. Assign the policies to each new resource before the remapped endpoints
+  serve requests. The dashboard and `IResourcePolicyManagementService` only accept resources the running application has,
+  so either store the assignments through `IResourcePolicyStore` ahead of the deployment and invalidate the cache, or keep
+  the remapped endpoints unexposed until they are in place.
 
 ### One permission per endpoint
 
@@ -266,34 +320,27 @@ Permissions are then named `mvc:{area}:{controller}:{action}` (`mvc::Orders:Edit
 (`page::/Orders/Edit`), and `endpoint:{name}` or `endpoint:{methods} {route}` (`endpoint:GET /api/orders`). All handlers of
 a page share its permission.
 
-### What is permission-checked
+### Controllers with the same name
 
-With the default options, the permission check is added to ASP.NET Core's **default authorization policy**. Every endpoint
-protected by a plain `[Authorize]`, `RequireAuthorization()` or `AuthorizeFolder()` requires a permission, with no
-attribute changes. What is **not** permission-checked:
+Because controllers are identified by their area and name, two controllers with the same name in the same area, such as
+`Admin.WidgetsController` and `Client.WidgetsController` without `[Area]`, would be the same resource: granting a
+permission, or assigning a policy, for one would apply to the other, including the read access that any operation
+implies. Instead, the application fails to start and names the controllers, and requests to them are denied should such a
+controller be added at runtime.
 
-- `[AllowAnonymous]` endpoints.
-- `[Authorize(Roles = "...")]` or `[Authorize(Policy = "...")]` without a plain `[Authorize]`: you already chose static
-  authorization for those.
-- Endpoints marked `[IgnoreDynamicAuthorization]` or `.IgnoreDynamicAuthorization()`, and areas listed in `IgnoredAreas`
-  (`Identity` by default, so the Identity UI account pages stay available), including Minimal API areas set with
-  `WithPermissionArea`. They still require a signed-in user.
+To fix it, do one of the following:
 
-`RequireDynamicAuthorization()` requires the permission even when `ApplyToDefaultPolicy` is disabled.
+- Put them in different areas with `[Area]`. Areas that only differ in case or hyphens, such as `BackOffice` and
+  `Back-Office`, are the same resource.
+- Rename one of them.
+- Give each a resource of its own with `[PermissionResource]`.
 
-Your own policies are permission-checked when they include the requirement: `options.AddPolicy("Managers", p =>
-p.RequireRole("Manager").AddRequirements(new DynamicPermissionRequirement()))` requires the role and the endpoint's
-permission. Inline policies passed to `RequireAuthorization(policy)` replace the default policy, as in ASP.NET Core, so
-they are permission-checked only when they include the requirement. The fallback policy can require an explicit
-permission (`new DynamicPermissionRequirement("app.access")`) but not the permission of the endpoint: endpoints without
-authorization metadata have none, and startup fails with an explanation.
+To share permissions on purpose, for example between versions of an API, every one of the controllers must opt in:
 
-A SignalR hub is one endpoint, although `MapHub` maps two: `MapHub<ChatHub>("/chat").RequireAuthorization()` requires
-`chat.access` for the hub and for `/chat/negotiate`, which clients call first.
-
-Razor runtime compilation is supported. Its pages are compiled when they are first described, for example when the
-dashboard lists the endpoints, rather than on their first request, because only a compiled page has its authorization,
-page model attributes and handlers.
+- Declare the same resource on each: `[PermissionResource("widgets")]`.
+- Use an explicit key, `[Permission("widgets.read")]`, on actions that require a permission of another resource.
+- With the endpoint convention, permissions don't depend on the resource, so sharing ones also need `[Permission("key")]`
+  on the actions of each controller.
 
 ### Display names
 
@@ -353,6 +400,8 @@ modelBuilder.EnableDynamicAuthorization(o => o.ResourcePolicies = true); // adds
 The table is opt-in, so applications that don't assign policies have nothing to migrate. Admins then choose each resource's
 policies on the dashboard's **Policies** page, which exists only while a policy is assignable.
 
+How assigned policies are applied:
+
 - **Per resource.** A policy assigned to `orders` applies to every permission-checked endpoint of the resource: the
   `OrdersController` actions, the `/Orders` pages and `/api/orders`, whatever the operation. The resource is the endpoint's
   own (its controller, page folder or route, or `[PermissionResource]`), not the resource of the permission it requires:
@@ -378,13 +427,13 @@ policies on the dashboard's **Policies** page, which exists only while a policy 
   registered policy that the provider cannot find denies.
 
 Assigned policies receive the authorization resource the request was authorized with (the `HttpContext`, or an MVC
-filter context), as they would on the endpoint itself. Replacing a resource's policies runs in a serializable transaction:
-of two concurrent edits, the last to commit wins, and on some providers the other fails with a serialization error and
-can be saved again.
+filter context), as they would on the endpoint itself.
 
-Assignments are cached like role permissions, as one entry; the management service invalidates it when they change. Use
-`IResourcePolicyManagementService` to change them in code, or call `IDynamicAuthorizationCache.InvalidateResourcePoliciesAsync`
-after changing the store yourself. To store them elsewhere, implement `IResourcePolicyStore`.
+**Managing assignments in code.** Use `IResourcePolicyManagementService` to change them, or call
+`IDynamicAuthorizationCache.InvalidateResourcePoliciesAsync` after changing the store yourself; to store them elsewhere,
+implement `IResourcePolicyStore`. Assignments are cached like role permissions, as one entry, and the management service
+invalidates it when they change. Replacing a resource's policies runs in a serializable transaction: of two concurrent
+edits, the last to commit wins, and on some providers the other fails with a serialization error and can be saved again.
 
 ## Showing content only to users who may access it
 
@@ -415,18 +464,6 @@ request would be, so links to anonymous pages are always shown and links to role
 </secure-content>
 ```
 
-## Super admins
-
-Super admins have every permission, which lets you bootstrap the first administrator before any role exists:
-
-```csharp
-options.SuperAdminUsers.Add("admin@example.com"); // by username
-options.SuperAdminRoles.Add("Administrators");    // members of these roles
-```
-
-Super admin roles can't be renamed or deleted from the dashboard, and the last member of a super admin role can't be removed
-when no super admin user is configured.
-
 ## Dashboard
 
 The dashboard is a set of Razor Pages served under `/authz`, styled after the .NET Aspire dashboard, with light and dark themes.
@@ -453,12 +490,22 @@ It has no JavaScript or CSS dependencies and works with a strict Content Securit
 });
 ```
 
-By default, the dashboard is protected by permissions like any other part of the application: `authz.roles.read`,
-`authz.roles.create`, `authz.roles.update`, `authz.roles.delete`, `authz.users.read`, `authz.users.update`, and read access to
-the overview, endpoints and access check. You can let a role view roles without letting it change them, or manage roles
-without managing users. Navigation and buttons only show what the user may do. Treat the role and user permissions as
-administrator access: whoever can edit roles can grant themselves any permission. The Policies page requires
-`authz.policies.read`, and `authz.policies.update` to change assignments.
+### Who can use the dashboard
+
+By default, the dashboard is protected by permissions like any other part of the application:
+
+| Permission | Allows |
+| --- | --- |
+| `authz.overview.read`, `authz.endpoints.read`, `authz.access.read` | The Overview, Endpoints and Access check pages. |
+| `authz.roles.read` | Viewing roles. |
+| `authz.roles.create`, `authz.roles.update`, `authz.roles.delete` | Managing roles and their permissions. |
+| `authz.users.read`, `authz.users.update` | Viewing users and assigning their roles. |
+| `authz.policies.read`, `authz.policies.update` | Viewing and changing the policies assigned to resources. |
+
+You can let a role view roles without letting it change them, or manage roles without managing users; navigation and
+buttons only show what the user may do.
+
+**Treat the role and user permissions as administrator access:** whoever can edit roles can grant themselves any permission.
 
 ### Searching users
 
@@ -487,16 +534,22 @@ each search, whatever the collation.
 ## Caching and multiple instances
 
 User roles and role permissions are cached for `CacheDuration` (one minute by default), in the memory of the instance unless
-you register another cache (see below). Changes made through the dashboard or the management services apply immediately on
-the instance that made them; other instances, and changes made elsewhere (for example with `UserManager.AddToRoleAsync`),
-become visible when the cache expires. Call `IDynamicAuthorizationCache.InvalidateUserAsync`/`InvalidateRoleAsync` after
-changing roles in your own code, or set `CacheDuration` to `TimeSpan.Zero` to disable caching.
+you [share the cache](#sharing-the-cache-between-instances).
+
+- Changes made through the dashboard or the management services apply immediately on the instance that made them.
+- Other instances, and changes made elsewhere (for example with `UserManager.AddToRoleAsync`), see the change when the
+  cache expires. Call `IDynamicAuthorizationCache.InvalidateUserAsync`/`InvalidateRoleAsync` after changing roles in your
+  own code, or set `CacheDuration` to `TimeSpan.Zero` to disable caching.
+- When you call the management services inside your own transaction, invalidate the affected role or user (or call
+  `InvalidateAllAsync`) after committing: the services cannot see when your transaction completes.
 
 Concurrent requests for the same user or role share one load, and a change made while a load is in progress is never
 hidden by it. Loads run in a service scope of their own, outside any ambient transaction, so they read committed data
-only and never depend on the request that started them. When you call the management services inside your own
-transaction, invalidate the affected role or user (or call `InvalidateAllAsync`) after committing: the services cannot see
-when your transaction completes.
+only and never depend on the request that started them.
+
+Within one request, the roles of the user and the permissions of those roles are resolved once, however many
+`secure-content` tags and permission checks the request makes, and no longer than the cache keeps them: a scope that
+outlives a request, for example one held by a background service, sees changes made elsewhere when the cache does.
 
 ### Sharing the cache between instances
 
@@ -513,15 +566,19 @@ builder.Services
     .UseHybridCache();
 ```
 
-`UseHybridCache()` registers `HybridCache` with its defaults when the application has not; configure it with
-`services.AddHybridCache(options => ...)` if you need to. Entries live in the distributed cache for `CacheDuration` and in
-the memory of each instance for `LocalCacheDuration` (five seconds by default, `UseHybridCache(o => o.LocalCacheDuration = ...)`).
-An invalidation writes a marker to the cache, for the user or role or for everything, and removes the entry from the
-distributed cache; every read compares an entry with the markers, so the other instances see the invalidation within
-`LocalCacheDuration`, and a load that was running on any instance when it happened is not kept. `HybridCache` reads one key at a time, so the
-permissions of roles that are not cached are loaded one role at a time; each load is shared by every instance that reads
-the role. Keys and tags start with `KeyPrefix` (`dynamic-authorization:` by default); applications that share a distributed
-cache but not their users and roles must use different prefixes.
+- `UseHybridCache()` registers `HybridCache` with its defaults when the application has not; configure it with
+  `services.AddHybridCache(options => ...)` if you need to.
+- Entries live in the distributed cache for `CacheDuration` and in the memory of each instance for `LocalCacheDuration`
+  (five seconds by default, `UseHybridCache(o => o.LocalCacheDuration = ...)`).
+- An invalidation writes a marker to the cache, for the user or role or for everything, and removes the entry from the
+  distributed cache. Every read compares an entry with the markers, so the other instances see the invalidation within
+  `LocalCacheDuration`, and a load that was running on any instance when it happened is not kept.
+- `HybridCache` reads one key at a time, so the permissions of roles that are not cached are loaded one role at a time;
+  each load is shared by every instance that reads the role.
+- Keys and tags start with `KeyPrefix` (`dynamic-authorization:` by default). Applications that share a distributed cache
+  but not their users and roles must use different prefixes.
+
+### Using another cache or store
 
 To use another cache, implement `IDynamicAuthorizationCacheStore` and register it before `AddDynamicAuthorization()`, or
 replace the registration afterwards. The interface documents the contract permission checks rely on: concurrent reads of
@@ -532,9 +589,6 @@ resources](#assigning-policies-to-resources); otherwise they are cached in the m
 
 The permissions of roles that are not cached are loaded with one store call: the Entity Framework store runs one query,
 and a custom `IPermissionStore` can implement `GetPermissionsAsync(IEnumerable<string> roleIds, ...)` to do the same.
-Within one request, the roles of the user and the permissions of those roles are resolved once, however many
-`secure-content` tags and permission checks the request makes, and no longer than the cache keeps them: a scope that
-outlives a request, for example one held by a background service, sees changes made elsewhere when the cache does.
 
 ## Options
 
@@ -553,7 +607,9 @@ outlives a request, for example one held by a background service, sees changes m
 `EnableDynamicAuthorization(o => { o.TableName = "..."; o.Schema = "..."; })` customizes the table;
 `o.ResourcePolicies = true` adds the table of the policies assigned to resources (`o.ResourcePolicyTableName`).
 
-## Migrating from 1.x
+## Upgrading
+
+### Migrating from 1.x
 
 | 1.x | 2.x |
 | --- | --- |
@@ -590,17 +646,18 @@ CRUD permissions can grant more than a 1.x action did: a role that could open `O
 Version 2 also authorizes Razor Pages and Minimal APIs: Razor Pages protected with `[Authorize]` (including the Identity UI if
 you removed `Identity` from `IgnoredAreas`) now require permissions too.
 
-## Sample
+### Upgrading from an earlier 2.x version
 
-[`samples/SampleWebApp`](https://github.com/mo-esmp/Dynamic-Authorization/tree/main/samples/SampleWebApp) protects
-Razor Pages, an MVC area and Minimal APIs, uses SQLite with migrations, registers two policies admins can assign to
-resources (`BusinessHours` and `CompanyAccounts`), and seeds three demo accounts (the password is in `appsettings.json`):
+A POST to the route segment named after a `WithPermissionResource` resource is now a create (see
+[Overriding the convention](#overriding-the-convention)). Review two sets of grants before rollout:
 
-```shell
-dotnet run --project samples/SampleWebApp --framework net11.0 --launch-profile http
-```
+- Such a POST used to require `{resource}.{last segment}` (`admin.orders.orders`) when the route had more than one segment
+  besides `api` and the version. Roles that had it lose the POST until they are granted `{resource}.create`, and the
+  dashboard's Overview lists the old grant as no longer matching anything.
+- Roles that already have `{resource}.create` gain the POST, and granting `create` to holders of the old permission also
+  opens every other endpoint that requires it.
 
-The sample targets .NET 10 and .NET 11, so `dotnet run` needs `--framework`; use `net10.0` to run it on .NET 10.
+To keep the old boundary, require the old permission explicitly: `.RequirePermission("admin.orders.orders")`.
 
 ## Building
 
