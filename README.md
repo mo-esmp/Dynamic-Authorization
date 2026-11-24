@@ -179,6 +179,13 @@ app.MapGroup("/api/admin").WithPermissionArea("admin");              // like [Ar
 
 `[Permission]` also works on page handler methods, for example on `OnPostApprove`.
 
+With `WithPermissionResource`, a POST to the route segment named after the resource is a create, however many segments
+come before it: `POST /api/legacy/orders` in a group with `WithPermissionResource("admin.orders")` requires
+`admin.orders.create`. **When upgrading** from an earlier 2.x version: such a POST used to require
+`{resource}.{last segment}` (`admin.orders.orders`) when the route had more than one segment besides `api` and the
+version. Grant `{resource}.create` to the roles that had the old permission, which the dashboard's Overview then lists as
+a granted permission that no longer matches anything.
+
 ### Permission-checking only some APIs
 
 To check permissions only on some endpoints, such as the admin APIs, and leave the others to plain `[Authorize]`, turn
