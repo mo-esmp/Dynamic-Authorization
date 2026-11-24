@@ -28,6 +28,7 @@ touching the source code?
 
 - [Packages](#packages)
 - [Getting started](#getting-started)
+  - [Run the sample](#run-the-sample)
 - [How it works](#how-it-works)
   - [Permissions: resources and operations](#permissions-resources-and-operations)
   - [How the operation is chosen](#how-the-operation-is-chosen)
@@ -500,7 +501,7 @@ By default, the dashboard is protected by permissions like any other part of the
 | `authz.roles.read` | Viewing roles. |
 | `authz.roles.create`, `authz.roles.update`, `authz.roles.delete` | Managing roles and their permissions. |
 | `authz.users.read`, `authz.users.update` | Viewing users and assigning their roles. |
-| `authz.policies.read`, `authz.policies.update` | Viewing and changing the policies assigned to resources. |
+| `authz.policies.read`, `authz.policies.update` | Viewing and changing the policies assigned to resources. These exist only while a policy is assignable (`AddAssignablePolicy`), like the Policies page. |
 
 You can let a role view roles without letting it change them, or manage roles without managing users; navigation and
 buttons only show what the user may do.
