@@ -311,21 +311,39 @@ internal sealed partial class EndpointAuthorizationResolver
             ?? $"{(httpMethods.Length == 0 ? "ANY" : string.Join(", ", httpMethods))} {route}";
 
         // The resource is the first literal segment of the route, after "api" and a version: /api/v1/orders/{id}: orders.
+        // An area's own segment is skipped too, and the area prefixes the resource: /api/admin/orders: admin.orders.
+        string? area = metadata.GetMetadata<IPermissionAreaMetadata>()?.Area;
         string[] segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
         string[] literals = [.. segments.Where(s => IsLiteral(s) && !IsApiOrVersion(s))];
-        string resourceKey = resource?.Resource
-            ?? (literals.Length > 0 ? PermissionKeys.ToSegment(literals[0]) : tag is null ? EndpointsResource : PermissionKeys.ToSegment(tag));
+        if (area is not null)
+        {
+            literals = WithoutAreaSegment(literals, area);
+        }
+
+        string resourceKey = resource?.Resource ?? (area, literals.Length) switch
+        {
+            (null, > 0) => PermissionKeys.ToSegment(literals[0]),
+            (null, _) => tag is null ? EndpointsResource : PermissionKeys.ToSegment(tag),
+            (_, > 0) => JoinResource(area, [literals[0]]),
+            _ => PermissionKeys.ToSegment(area),
+        };
+
+        // Like a controller in an area: "admin / Orders", or the area itself for the route of the area.
+        string group = resource?.DisplayName
+            ?? (resource is null && area is not null
+                ? literals.Length > 0 ? WithArea(area, tag ?? PermissionKeys.GetResourceDisplayName(PermissionKeys.ToSegment(literals[0]))) : area
+                : tag ?? PermissionKeys.GetResourceDisplayName(resourceKey));
 
         Target target = new(
             endpointName is null ? PermissionKeys.ForRoute(httpMethods, route) : PermissionKeys.ForEndpointName(endpointName),
             resourceKey,
-            resource?.DisplayName ?? tag ?? PermissionKeys.GetResourceDisplayName(resourceKey),
+            group,
             resource?.DisplayName is null ? TagGroupPriority : ExplicitGroupPriority,
             null,
             displayName,
             PermissionSource.Endpoint);
 
-        EndpointProtection protection = GetProtection(metadata, null, options, authorization, overrides is not null);
+        EndpointProtection protection = GetProtection(metadata, area, options, authorization, overrides is not null);
         PermissionDescriptor? permission = protection == EndpointProtection.DynamicPermission
             ? CreatePermission(target, overrides, options, () =>
                 OperationConventions.FromName(endpointName)
@@ -334,7 +352,7 @@ internal sealed partial class EndpointAuthorizationResolver
             : null;
 
         EndpointAuthorizationInfo entry = new(
-            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, null, protection, target.TargetKey, permission)
+            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, area, protection, target.TargetKey, permission)
         {
             Resource = target.Resource,
         };
@@ -538,6 +556,18 @@ internal sealed partial class EndpointAuthorizationResolver
         routeValues.TryGetValue("area", out string? area) && !string.IsNullOrEmpty(area) ? area : null;
 
     private static string WithArea(string? area, string name) => area is null ? name : $"{area} / {name}";
+
+    /// <summary>
+    ///   Removes the first literal segment that names the area, compared as permission key segments, so that
+    ///   <c>BackOffice</c> matches <c>back-office</c>. A route without one keeps every segment.
+    /// </summary>
+    private static string[] WithoutAreaSegment(string[] literals, string area)
+    {
+        string key = PermissionKeys.ToSegment(area);
+        int index = Array.FindIndex(literals, l => string.Equals(PermissionKeys.ToSegment(l), key, StringComparison.Ordinal));
+
+        return index < 0 ? literals : [.. literals[..index], .. literals[(index + 1)..]];
+    }
 
     private static bool IsRequestMethod(string method) =>
         HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsPost(method) || HttpMethods.IsPut(method)

@@ -107,6 +107,19 @@ public sealed class ResourcePolicyTests
     }
 
     [Fact]
+    public async Task Policies_of_an_area_resource_apply_to_its_minimal_apis()
+    {
+        await using TestApp app = await StartAsync(e => e.MapGet("/api/admin/settings", () => "settings").RequireAuthorization().WithPermissionArea("Admin"));
+        TestUser user = await app.CreateUserWithPermissionsAsync("alice", "admin.settings.read");
+        HttpClient client = app.CreateClient(user);
+
+        await AssignAsync(app, "admin.settings", "Deny");
+
+        Assert.Equal(HttpStatusCode.Forbidden, await client.GetStatusAsync("/Admin/Settings"));
+        Assert.Equal(HttpStatusCode.Forbidden, await client.GetStatusAsync("/api/admin/settings"));
+    }
+
+    [Fact]
     public async Task Super_admins_skip_assigned_policies()
     {
         await using TestApp app = await StartAsync(configure: a => a.SuperAdminRoles.Add("Admins"));

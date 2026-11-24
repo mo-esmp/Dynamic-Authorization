@@ -77,6 +77,25 @@ public static class DynamicAuthorizationEndpointConventionBuilderExtensions
     }
 
     /// <summary>
+    ///   Places endpoints in an area, the way <c>[Area]</c> does for a controller. The area's route segment is skipped,
+    ///   and the area prefixes the resource derived from the rest of the route, wherever API version segments are:
+    ///   <c>GET /api/admin/orders</c> and <c>GET /api/v2/admin/orders</c> in the <c>admin</c> area require
+    ///   <c>admin.orders.read</c>. Area endpoints share their permissions with the controllers of the same area and
+    ///   resource, and <see cref="DynamicAuthorizationOptions.IgnoredAreas"/> applies to them.
+    /// </summary>
+    /// <typeparam name="TBuilder">The endpoint convention builder type.</typeparam>
+    /// <param name="builder">The endpoint convention builder.</param>
+    /// <param name="area">The area name, for example <c>admin</c>.</param>
+    /// <returns>The builder.</returns>
+    public static TBuilder WithPermissionArea<TBuilder>(this TBuilder builder, string area)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new PermissionAreaMetadata(area));
+    }
+
+    /// <summary>
     ///   Excludes endpoints from the dynamic permission check. Other authorization, such as requiring an
     ///   authenticated user, still applies.
     /// </summary>

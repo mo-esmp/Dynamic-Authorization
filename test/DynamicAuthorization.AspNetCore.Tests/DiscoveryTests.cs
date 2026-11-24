@@ -329,4 +329,86 @@ public sealed class DiscoveryTests
         Assert.Null(entry.Resource);
         Assert.Empty(new PermissionCatalog([], [entry]).GetResourceEndpoints("test"));
     }
+
+    /// <summary>
+    ///   A permission area works like an MVC area: its route segment is skipped, and it prefixes the resource derived
+    ///   from the rest of the route, whatever the version segments around it.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/admin", "admin", "admin.read")]
+    [InlineData("GET", "/api/admin/orders", "admin.orders", "admin.orders.read")]
+    [InlineData("POST", "/api/admin/orders", "admin.orders", "admin.orders.create")]
+    [InlineData("POST", "/api/admin/orders/{id:int}/ship", "admin.orders", "admin.orders.ship")]
+    [InlineData("GET", "/api/admin/orders/export", "admin.orders", "admin.orders.export")]
+    [InlineData("DELETE", "/api/admin/users/{id:int}", "admin.users", "admin.users.delete")]
+    [InlineData("GET", "/api/admin/reports/{id:int}", "admin.reports", "admin.reports.read")]
+    [InlineData("GET", "/api/admin/audit", "admin.audit", "audit.view")]
+    [InlineData("GET", "/api/admin/legacy", "legacy", "legacy.read")]
+    [InlineData("POST", "/api/admin/legacy", "legacy", "legacy.create")]
+    [InlineData("GET", "/api/v1/admin/invoices", "admin.invoices", "admin.invoices.read")]
+    [InlineData("GET", "/api/admin/v2/invoices", "admin.invoices", "admin.invoices.read")]
+    [InlineData("GET", "/api/v{version}/admin/invoices", "admin.invoices", "admin.invoices.read")]
+    [InlineData("GET", "/api/back-office/stock", "back-office.stock", "back-office.stock.read")]
+    [InlineData("GET", "/api/backoffice/orders", "admin.backoffice", "admin.backoffice.read")]
+    public async Task Minimal_api_areas_prefix_the_resource_and_keep_the_operation(string method, string route, string resource, string permission)
+    {
+        await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = MapAdminApis);
+
+        EndpointAuthorizationInfo entry = Assert.IsType<EndpointAuthorizationInfo>(app.GetCatalog().FindEndpoint(PermissionKeys.ForRoute([method], route)));
+        Assert.Equal(resource, entry.Resource);
+        Assert.Equal(permission, entry.Permission?.Permission);
+    }
+
+    [Fact]
+    public async Task Minimal_api_areas_are_shown_like_controller_areas()
+    {
+        await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = MapAdminApis);
+
+        PermissionCatalog catalog = app.GetCatalog();
+
+        Assert.Equal("admin / Orders", catalog.FindPermission("admin.orders.read")?.Group);
+        EndpointAuthorizationInfo entry = Assert.IsType<EndpointAuthorizationInfo>(catalog.FindEndpoint("endpoint:GET /api/admin/orders"));
+        Assert.Equal("admin", entry.Area);
+    }
+
+    [Fact]
+    public async Task Minimal_api_areas_keep_endpoint_convention_keys()
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Authorization = a => a.Convention = PermissionConvention.Endpoint;
+            o.Endpoints = MapAdminApis;
+        });
+
+        EndpointAuthorizationInfo entry = Assert.IsType<EndpointAuthorizationInfo>(app.GetCatalog().FindEndpoint("endpoint:GET /api/admin/orders"));
+        Assert.Equal("endpoint:GET /api/admin/orders", entry.Permission?.Permission);
+        Assert.Equal("admin.orders", entry.Resource);
+    }
+
+    [Fact]
+    public void Permission_area_must_not_be_empty()
+    {
+        Assert.Throws<ArgumentException>(() => new PermissionAreaMetadata(" "));
+        Assert.ThrowsAny<ArgumentException>(() => new PermissionAreaMetadata(null!));
+    }
+
+    private static void MapAdminApis(IEndpointRouteBuilder e)
+    {
+        RouteGroupBuilder admin = e.MapGroup("/api/admin").RequireAuthorization().WithPermissionArea("admin");
+        admin.MapGet("", () => "admin");
+        admin.MapGet("/orders", () => "orders");
+        admin.MapPost("/orders", () => "created");
+        admin.MapPost("/orders/{id:int}/ship", (int id) => "shipped");
+        admin.MapGet("/orders/export", () => "export").RequirePermissionOperation("export");
+        admin.MapDelete("/users/{id:int}", (int id) => "deleted");
+        admin.MapGroup("/reports").MapGet("/{id:int}", (int id) => "report");
+        admin.MapGet("/audit", () => "audit").RequirePermission("audit.view");
+        admin.MapGet("/legacy", () => "legacy").WithPermissionResource("legacy");
+        admin.MapPost("/legacy", () => "legacy").WithPermissionResource("legacy");
+        e.MapGet("/api/v1/admin/invoices", () => "v1").RequireAuthorization().WithPermissionArea("admin");
+        e.MapGet("/api/admin/v2/invoices", () => "v2").RequireAuthorization().WithPermissionArea("admin");
+        e.MapGet("/api/v{version}/admin/invoices", (string version) => version).RequireAuthorization().WithPermissionArea("admin");
+        e.MapGet("/api/back-office/stock", () => "stock").RequireAuthorization().WithPermissionArea("BackOffice");
+        e.MapGet("/api/backoffice/orders", () => "back office").RequireAuthorization().WithPermissionArea("admin");
+    }
 }
