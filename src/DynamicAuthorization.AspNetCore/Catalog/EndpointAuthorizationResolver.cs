@@ -348,7 +348,7 @@ internal sealed partial class EndpointAuthorizationResolver
             ? CreatePermission(target, overrides, options, () =>
                 OperationConventions.FromName(endpointName)
                 ?? OperationConventions.FromHttpMethods(httpMethods)
-                ?? GetRouteOperation(segments, literals, httpMethods))
+                ?? GetRouteOperation(segments, literals, httpMethods, resource?.Resource))
             : null;
 
         EndpointAuthorizationInfo entry = new(
@@ -426,7 +426,7 @@ internal sealed partial class EndpointAuthorizationResolver
             : PermissionOperation.Update;
     }
 
-    private static string GetRouteOperation(string[] segments, string[] literals, string[] httpMethods)
+    private static string GetRouteOperation(string[] segments, string[] literals, string[] httpMethods, string? explicitResource)
     {
         string? last = segments.Length > 0 ? segments[^1] : null;
         bool endsWithLiteral = last is not null && IsLiteral(last) && !IsApiOrVersion(last);
@@ -439,10 +439,25 @@ internal sealed partial class EndpointAuthorizationResolver
                 return PermissionOperation.Update;
             }
 
-            return literals.Length <= 1 ? PermissionOperation.Create : PermissionKeys.ToSegment(last!);
+            // With an explicit resource, the collection is the segment named after it: POST /api/legacy/orders with the
+            // resource admin.orders creates.
+            return literals.Length <= 1 || NamesResource(last!, explicitResource)
+                ? PermissionOperation.Create
+                : PermissionKeys.ToSegment(last!);
         }
 
         return endsWithLiteral && literals.Length > 1 ? PermissionKeys.ToSegment(last!) : AnyOperation;
+    }
+
+    private static bool NamesResource(string segment, string? resource)
+    {
+        if (resource is null)
+        {
+            return false;
+        }
+
+        string name = resource[(resource.LastIndexOf('.') + 1)..];
+        return string.Equals(PermissionKeys.ToSegment(segment), name, StringComparison.OrdinalIgnoreCase);
     }
 
     private static EndpointProtection GetProtection(

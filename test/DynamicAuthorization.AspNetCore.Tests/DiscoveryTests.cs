@@ -392,6 +392,29 @@ public sealed class DiscoveryTests
         Assert.ThrowsAny<ArgumentException>(() => new PermissionAreaMetadata(null!));
     }
 
+    /// <summary>
+    ///   A POST to a collection is a create. With an explicit resource, the collection is the route segment named
+    ///   after the resource, however many segments come before it.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/legacy/orders", "admin.orders.create")]
+    [InlineData("/api/legacy/orders/{id:int}/ship", "admin.orders.ship")]
+    [InlineData("/api/legacy/orders/archive", "admin.orders.archive")]
+    [InlineData("/api/items/{id:int}/ship", "items.ship")]
+    public async Task Posts_to_an_explicit_resource_collection_create(string route, string permission)
+    {
+        await using TestApp app = await TestApp.StartAsync(o => o.Endpoints = e =>
+        {
+            RouteGroupBuilder legacy = e.MapGroup("/api/legacy/orders").RequireAuthorization().WithPermissionResource("admin.orders");
+            legacy.MapPost("", () => "created");
+            legacy.MapPost("/{id:int}/ship", (int id) => "shipped");
+            legacy.MapPost("/archive", () => "archived");
+        });
+
+        EndpointAuthorizationInfo entry = Assert.IsType<EndpointAuthorizationInfo>(app.GetCatalog().FindEndpoint(PermissionKeys.ForRoute(["POST"], route)));
+        Assert.Equal(permission, entry.Permission?.Permission);
+    }
+
     private static void MapAdminApis(IEndpointRouteBuilder e)
     {
         RouteGroupBuilder admin = e.MapGroup("/api/admin").RequireAuthorization().WithPermissionArea("admin");
