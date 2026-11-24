@@ -181,10 +181,14 @@ app.MapGroup("/api/admin").WithPermissionArea("admin");              // like [Ar
 
 With `WithPermissionResource`, a POST to the route segment named after the resource is a create, however many segments
 come before it: `POST /api/legacy/orders` in a group with `WithPermissionResource("admin.orders")` requires
-`admin.orders.create`. **When upgrading** from an earlier 2.x version: such a POST used to require
+`admin.orders.create`.
+
+**When upgrading** from an earlier 2.x version, review two sets of grants before rollout. Such a POST used to require
 `{resource}.{last segment}` (`admin.orders.orders`) when the route had more than one segment besides `api` and the
-version. Grant `{resource}.create` to the roles that had the old permission, which the dashboard's Overview then lists as
-a granted permission that no longer matches anything.
+version: roles that had it lose the POST until they are granted `{resource}.create`, and the dashboard's Overview lists
+the old grant as no longer matching anything. Roles that already have `{resource}.create` gain the POST, and granting
+`create` to holders of the old permission also opens every other endpoint that requires it. To keep the old boundary,
+require the old permission explicitly: `.RequirePermission("admin.orders.orders")`.
 
 ### Permission-checking only some APIs
 
@@ -195,7 +199,9 @@ that they get permissions of their own:
 ```csharp
 builder.Services.AddDynamicAuthorization(options => options.ApplyToDefaultPolicy = false);
 
-app.MapGroup("/api/client").RequireAuthorization();                 // any signed-in user
+RouteGroupBuilder client = app.MapGroup("/api/client")
+    .RequireAuthorization();                                        // any signed-in user
+client.MapGet("/orders", ...);
 
 RouteGroupBuilder admin = app.MapGroup("/api/admin")
     .RequireDynamicAuthorization()                                  // a granted permission
@@ -203,6 +209,9 @@ RouteGroupBuilder admin = app.MapGroup("/api/admin")
 admin.MapGet("/orders", ...);
 admin.MapPost("/orders", ...);
 ```
+
+Map the endpoints on the returned groups: an endpoint mapped on `app` gets none of a group's authorization, even with
+the same URL prefix.
 
 | Endpoint | Permission |
 | --- | --- |
@@ -213,11 +222,22 @@ admin.MapPost("/orders", ...);
 | `GET /api/v2/admin/orders`, `GET /api/admin/v2/orders` | `admin.orders.read` |
 
 Without the area, every admin endpoint would belong to one `admin` resource, and `admin.read` would grant reading
-everything under `/api/admin`. The area's route segment is skipped wherever the version segments are, so all versions
-share a permission; the area matches its segment whatever the case and separators (`BackOffice` matches
-`/api/backoffice` and `/api/back-office`). An area works like `[Area("Admin")]` on a controller: `[Area("Admin")]
-OrdersController` and `/api/admin/orders` share the `admin.orders` permissions and the policies assigned to that
-resource, and `IgnoredAreas` applies to both. `WithPermissionResource` replaces the whole resource, area included.
+everything under `/api/admin`. The area's segment is skipped when it starts the route, after `api` and any version
+segment, so all versions share a permission; a later segment with the area's name is kept, so an action like `POST
+/api/orders/{id}/admin` in a group at `/api/orders` still requires `admin.orders.admin`. The area matches its segment
+whatever the case and separators (`BackOffice` matches `/api/backoffice` and `/api/back-office`). An area works like
+`[Area("Admin")]` on a controller: `[Area("Admin")] OrdersController` and `/api/admin/orders` share the `admin.orders`
+permissions and the policies assigned to that resource, and `IgnoredAreas` applies to both. `WithPermissionResource`
+replaces the whole resource, area included.
+
+**Adding an area to existing endpoints** moves them to new resources: `/api/admin/orders` moves from `admin` to
+`admin.orders`. With the CRUD convention their permissions change too, and the dashboard lists the old grants as no
+longer matching anything; with `PermissionConvention.Endpoint` the grants still match. Under either convention, the
+policies assigned to the old resource stop applying to them at once, because a resource without assignments has no extra
+restrictions. Assign the policies to each new resource before the remapped endpoints serve requests. The dashboard and
+`IResourcePolicyManagementService` only accept resources the running application has, so either store the assignments
+through `IResourcePolicyStore` ahead of the deployment and invalidate the cache, or keep the remapped endpoints
+unexposed until they are in place.
 
 You can also keep `ApplyToDefaultPolicy` and exclude the client APIs with `.IgnoreDynamicAuthorization()` instead. Turning
 the default off is safer: a new endpoint is never permission-checked by accident, only by asking for it.
