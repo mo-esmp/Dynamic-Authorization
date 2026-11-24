@@ -311,30 +311,48 @@ internal sealed partial class EndpointAuthorizationResolver
             ?? $"{(httpMethods.Length == 0 ? "ANY" : string.Join(", ", httpMethods))} {route}";
 
         // The resource is the first literal segment of the route, after "api" and a version: /api/v1/orders/{id}: orders.
+        // An area's own segment is skipped too, and the area prefixes the resource: /api/admin/orders: admin.orders.
+        string? area = metadata.GetMetadata<IPermissionAreaMetadata>()?.Area;
         string[] segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
         string[] literals = [.. segments.Where(s => IsLiteral(s) && !IsApiOrVersion(s))];
-        string resourceKey = resource?.Resource
-            ?? (literals.Length > 0 ? PermissionKeys.ToSegment(literals[0]) : tag is null ? EndpointsResource : PermissionKeys.ToSegment(tag));
+        if (area is not null)
+        {
+            literals = WithoutAreaSegment(literals, area);
+        }
+
+        string resourceKey = resource?.Resource ?? (area, literals.Length) switch
+        {
+            (null, > 0) => PermissionKeys.ToSegment(literals[0]),
+            (null, _) => tag is null ? EndpointsResource : PermissionKeys.ToSegment(tag),
+            (_, > 0) => JoinResource(area, [literals[0]]),
+            _ => PermissionKeys.ToSegment(area),
+        };
+
+        // Like a controller in an area: "admin / Orders", or the area itself for the route of the area.
+        string group = resource?.DisplayName
+            ?? (resource is null && area is not null
+                ? literals.Length > 0 ? WithArea(area, tag ?? PermissionKeys.GetResourceDisplayName(PermissionKeys.ToSegment(literals[0]))) : area
+                : tag ?? PermissionKeys.GetResourceDisplayName(resourceKey));
 
         Target target = new(
             endpointName is null ? PermissionKeys.ForRoute(httpMethods, route) : PermissionKeys.ForEndpointName(endpointName),
             resourceKey,
-            resource?.DisplayName ?? tag ?? PermissionKeys.GetResourceDisplayName(resourceKey),
+            group,
             resource?.DisplayName is null ? TagGroupPriority : ExplicitGroupPriority,
             null,
             displayName,
             PermissionSource.Endpoint);
 
-        EndpointProtection protection = GetProtection(metadata, null, options, authorization, overrides is not null);
+        EndpointProtection protection = GetProtection(metadata, area, options, authorization, overrides is not null);
         PermissionDescriptor? permission = protection == EndpointProtection.DynamicPermission
             ? CreatePermission(target, overrides, options, () =>
                 OperationConventions.FromName(endpointName)
                 ?? OperationConventions.FromHttpMethods(httpMethods)
-                ?? GetRouteOperation(segments, literals, httpMethods))
+                ?? GetRouteOperation(segments, literals, httpMethods, resource?.Resource))
             : null;
 
         EndpointAuthorizationInfo entry = new(
-            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, null, protection, target.TargetKey, permission)
+            endpoint, displayName, target.Group, route, httpMethods, PermissionSource.Endpoint, area, protection, target.TargetKey, permission)
         {
             Resource = target.Resource,
         };
@@ -408,7 +426,7 @@ internal sealed partial class EndpointAuthorizationResolver
             : PermissionOperation.Update;
     }
 
-    private static string GetRouteOperation(string[] segments, string[] literals, string[] httpMethods)
+    private static string GetRouteOperation(string[] segments, string[] literals, string[] httpMethods, string? explicitResource)
     {
         string? last = segments.Length > 0 ? segments[^1] : null;
         bool endsWithLiteral = last is not null && IsLiteral(last) && !IsApiOrVersion(last);
@@ -421,10 +439,24 @@ internal sealed partial class EndpointAuthorizationResolver
                 return PermissionOperation.Update;
             }
 
-            return literals.Length <= 1 ? PermissionOperation.Create : PermissionKeys.ToSegment(last!);
+            // With an explicit resource, the collection is the segment named after it: POST /api/legacy/orders with the
+            // resource admin.orders creates.
+            return literals.Length <= 1 || NamesResource(last!, explicitResource)
+                ? PermissionOperation.Create
+                : PermissionKeys.ToSegment(last!);
         }
 
         return endsWithLiteral && literals.Length > 1 ? PermissionKeys.ToSegment(last!) : AnyOperation;
+    }
+
+    private static bool NamesResource(string segment, string? resource)
+    {
+        if (resource is null)
+        {
+            return false;
+        }
+
+        return IsSameName(segment, resource[(resource.LastIndexOf('.') + 1)..]);
     }
 
     private static EndpointProtection GetProtection(
@@ -538,6 +570,45 @@ internal sealed partial class EndpointAuthorizationResolver
         routeValues.TryGetValue("area", out string? area) && !string.IsNullOrEmpty(area) ? area : null;
 
     private static string WithArea(string? area, string name) => area is null ? name : $"{area} / {name}";
+
+    /// <summary>
+    ///   Removes the segment that names the area when it is the route's prefix: the first literal after "api" and the
+    ///   version. Later segments are kept, so an action that happens to have the area's name keeps its operation.
+    /// </summary>
+    private static string[] WithoutAreaSegment(string[] literals, string area) =>
+        literals.Length > 0 && IsSameName(literals[0], area) ? literals[1..] : literals;
+
+    /// <summary>
+    ///   Determines whether a route segment and a name written in code are the same name: their letters and digits
+    ///   are equal, ignoring case, so <c>BackOffice</c> matches <c>backoffice</c>, <c>back-office</c> and <c>back_office</c>.
+    /// </summary>
+    private static bool IsSameName(string segment, string name)
+    {
+        int i = 0;
+        int j = 0;
+        while (true)
+        {
+            while (i < segment.Length && !char.IsLetterOrDigit(segment[i]))
+            {
+                i++;
+            }
+
+            while (j < name.Length && !char.IsLetterOrDigit(name[j]))
+            {
+                j++;
+            }
+
+            if (i == segment.Length || j == name.Length)
+            {
+                return i == segment.Length && j == name.Length;
+            }
+
+            if (char.ToUpperInvariant(segment[i++]) != char.ToUpperInvariant(name[j++]))
+            {
+                return false;
+            }
+        }
+    }
 
     private static bool IsRequestMethod(string method) =>
         HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsPost(method) || HttpMethods.IsPut(method)

@@ -30,6 +30,7 @@ Framework Core** (any provider), and ships a **dashboard** to manage roles, perm
   - [3. Register dynamic authorization](#3-register-dynamic-authorization)
 - [Permissions: resources and operations](#permissions-resources-and-operations)
   - [Overriding the convention](#overriding-the-convention)
+  - [Permission-checking only some APIs](#permission-checking-only-some-apis)
   - [One permission per endpoint](#one-permission-per-endpoint)
   - [What is permission-checked](#what-is-permission-checked)
   - [Display names](#display-names)
@@ -147,7 +148,9 @@ The operation is inferred in this order; the first rule that matches wins:
 
 Endpoints with the same resource share its permissions: `orders.read` grants the read actions of `OrdersController`, the
 pages in `/Orders` and `GET /api/orders` alike. Areas are part of the resource (`admin.reports`). A Minimal API's resource
-is the first route segment after `api` and a version segment, so `/api/v2/orders` is `orders` too.
+is the first route segment after `api` and a version segment, so `/api/v2/orders` is `orders` too. A Minimal API area
+(`WithPermissionArea("admin")`, see [Permission-checking only some APIs](#permission-checking-only-some-apis)) skips its
+own segment and prefixes the resource: `/api/admin/orders` is `admin.orders`.
 
 **Controllers are identified by their area and name, not their namespace**, so renaming or moving a namespace keeps the
 granted permissions. Two controllers with the same name in the same area, such as `Admin.WidgetsController` and
@@ -183,9 +186,73 @@ public class OrdersController : Controller { ... }
 app.MapPost("/api/orders/{id}/approve", Approve).RequirePermission("orders.approve");
 app.MapPost("/api/orders/{id}/reopen", Reopen).RequirePermissionOperation(PermissionOperation.Update);
 app.MapGroup("/api/v1/sales").WithPermissionResource("orders");
+app.MapGroup("/api/admin").WithPermissionArea("admin");              // like [Area("Admin")]: admin.orders, admin.users, ...
 ```
 
 `[Permission]` also works on page handler methods, for example on `OnPostApprove`.
+
+With `WithPermissionResource`, a POST to the route segment named after the resource is a create, however many segments
+come before it: `POST /api/legacy/orders` in a group with `WithPermissionResource("admin.orders")` requires
+`admin.orders.create`.
+
+**When upgrading** from an earlier 2.x version, review two sets of grants before rollout. Such a POST used to require
+`{resource}.{last segment}` (`admin.orders.orders`) when the route had more than one segment besides `api` and the
+version: roles that had it lose the POST until they are granted `{resource}.create`, and the dashboard's Overview lists
+the old grant as no longer matching anything. Roles that already have `{resource}.create` gain the POST, and granting
+`create` to holders of the old permission also opens every other endpoint that requires it. To keep the old boundary,
+require the old permission explicitly: `.RequirePermission("admin.orders.orders")`.
+
+### Permission-checking only some APIs
+
+To check permissions only on some endpoints, such as the admin APIs, and leave the others to plain `[Authorize]`, turn
+off `ApplyToDefaultPolicy` and require dynamic authorization where you want it. Put the admin endpoints in an area so
+that they get permissions of their own:
+
+```csharp
+builder.Services.AddDynamicAuthorization(options => options.ApplyToDefaultPolicy = false);
+
+RouteGroupBuilder client = app.MapGroup("/api/client")
+    .RequireAuthorization();                                        // any signed-in user
+client.MapGet("/orders", ...);
+
+RouteGroupBuilder admin = app.MapGroup("/api/admin")
+    .RequireDynamicAuthorization()                                  // a granted permission
+    .WithPermissionArea("admin");
+admin.MapGet("/orders", ...);
+admin.MapPost("/orders", ...);
+```
+
+Map the endpoints on the returned groups: an endpoint mapped on `app` gets none of a group's authorization, even with
+the same URL prefix.
+
+| Endpoint | Permission |
+| --- | --- |
+| `GET /api/admin/orders` | `admin.orders.read` |
+| `POST /api/admin/orders` | `admin.orders.create` |
+| `POST /api/admin/orders/{id}/ship` | `admin.orders.ship` |
+| `DELETE /api/admin/users/{id}` | `admin.users.delete` |
+| `GET /api/v2/admin/orders`, `GET /api/admin/v2/orders` | `admin.orders.read` |
+
+Without the area, every admin endpoint would belong to one `admin` resource, and `admin.read` would grant reading
+everything under `/api/admin`. The area's segment is skipped when it starts the route, after `api` and any version
+segment, so all versions share a permission; a later segment with the area's name is kept, so an action like `POST
+/api/orders/{id}/admin` in a group at `/api/orders` still requires `admin.orders.admin`. The area matches its segment
+whatever the case and separators (`BackOffice` matches `/api/backoffice` and `/api/back-office`). An area works like
+`[Area("Admin")]` on a controller: `[Area("Admin")] OrdersController` and `/api/admin/orders` share the `admin.orders`
+permissions and the policies assigned to that resource, and `IgnoredAreas` applies to both. `WithPermissionResource`
+replaces the whole resource, area included.
+
+**Adding an area to existing endpoints** moves them to new resources: `/api/admin/orders` moves from `admin` to
+`admin.orders`. With the CRUD convention their permissions change too, and the dashboard lists the old grants as no
+longer matching anything; with `PermissionConvention.Endpoint` the grants still match. Under either convention, the
+policies assigned to the old resource stop applying to them at once, because a resource without assignments has no extra
+restrictions. Assign the policies to each new resource before the remapped endpoints serve requests. The dashboard and
+`IResourcePolicyManagementService` only accept resources the running application has, so either store the assignments
+through `IResourcePolicyStore` ahead of the deployment and invalidate the cache, or keep the remapped endpoints
+unexposed until they are in place.
+
+You can also keep `ApplyToDefaultPolicy` and exclude the client APIs with `.IgnoreDynamicAuthorization()` instead. Turning
+the default off is safer: a new endpoint is never permission-checked by accident, only by asking for it.
 
 ### One permission per endpoint
 
@@ -209,7 +276,8 @@ attribute changes. What is **not** permission-checked:
 - `[Authorize(Roles = "...")]` or `[Authorize(Policy = "...")]` without a plain `[Authorize]`: you already chose static
   authorization for those.
 - Endpoints marked `[IgnoreDynamicAuthorization]` or `.IgnoreDynamicAuthorization()`, and areas listed in `IgnoredAreas`
-  (`Identity` by default, so the Identity UI account pages stay available). They still require a signed-in user.
+  (`Identity` by default, so the Identity UI account pages stay available), including Minimal API areas set with
+  `WithPermissionArea`. They still require a signed-in user.
 
 `RequireDynamicAuthorization()` requires the permission even when `ApplyToDefaultPolicy` is disabled.
 

@@ -496,6 +496,56 @@ public sealed class AuthorizationTests
         Assert.Equal(PermissionDecision.SuperAdminUser, superAdmin.Decision);
     }
 
+    /// <summary>
+    ///   Client and admin APIs side by side: only the admin area is permission-checked, with permissions of its own.
+    /// </summary>
+    [Fact]
+    public async Task Only_the_admin_api_area_is_permission_checked()
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Authorization = a => a.ApplyToDefaultPolicy = false;
+            o.Endpoints = e =>
+            {
+                e.MapGroup("/api/client").RequireAuthorization().MapGet("/orders", () => "client orders");
+                e.MapGroup("/api/admin").RequireDynamicAuthorization().WithPermissionArea("admin").MapGet("/orders", () => "admin orders");
+            };
+        });
+        TestUser none = await app.CreateUserAsync("none");
+        TestUser admin = await app.CreateUserWithPermissionsAsync("admin", "admin.orders.read");
+        TestUser client = await app.CreateUserWithPermissionsAsync("client", "orders.read");
+
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(none).GetStatusAsync("/api/client/orders"));
+        Assert.Equal(HttpStatusCode.Forbidden, await app.CreateClient(none).GetStatusAsync("/api/admin/orders"));
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(admin).GetStatusAsync("/api/admin/orders"));
+        Assert.Equal(HttpStatusCode.Forbidden, await app.CreateClient(client).GetStatusAsync("/api/admin/orders"));
+    }
+
+    [Fact]
+    public async Task Ignored_areas_apply_to_minimal_api_areas()
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+        {
+            o.Authorization = a => a.IgnoredAreas.Add("Admin");
+            o.Endpoints = e => e.MapGet("/api/admin/orders", () => "admin orders").RequireAuthorization().WithPermissionArea("admin");
+        });
+        TestUser user = await app.CreateUserAsync("alice");
+
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(user).GetStatusAsync("/api/admin/orders"));
+        Assert.Equal(EndpointProtection.Excluded, app.GetCatalog().FindEndpoint("endpoint:GET /api/admin/orders")?.Protection);
+    }
+
+    [Fact]
+    public async Task Minimal_api_areas_share_permissions_with_area_controllers()
+    {
+        await using TestApp app = await TestApp.StartAsync(o =>
+            o.Endpoints = e => e.MapGet("/api/admin/settings", () => "settings").RequireAuthorization().WithPermissionArea("Admin"));
+        TestUser user = await app.CreateUserWithPermissionsAsync("alice", "admin.settings.read");
+
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(user).GetStatusAsync("/Admin/Settings"));
+        Assert.Equal(HttpStatusCode.OK, await app.CreateClient(user).GetStatusAsync("/api/admin/settings"));
+    }
+
     private static Task<bool> RemoveFromRoleWithUserManagerAsync(TestApp app, TestUser user, string role) =>
         app.WithScopeAsync(async s =>
         {
