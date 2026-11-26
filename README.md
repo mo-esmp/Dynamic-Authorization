@@ -1,5 +1,7 @@
 # Dynamic Authorization for ASP.NET Core
 
+[![Buy me AI tokens](https://buymeatokens.com/api/badge/mo-esmp)](https://buymeatokens.com/mo-esmp)
+
 [![CI](https://github.com/mo-esmp/Dynamic-Authorization/actions/workflows/ci.yml/badge.svg)](https://github.com/mo-esmp/Dynamic-Authorization/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/DynamicAuthorization.AspNetCore.svg)](https://www.nuget.org/packages/DynamicAuthorization.AspNetCore)
 
